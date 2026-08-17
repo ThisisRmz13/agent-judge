@@ -4,23 +4,25 @@ import json
 
 
 class AgentJudge(gl.Contract):
-    """Minimal trust-minimized judge for agent answers against live market data.
-
-    The contract stores task/answer/verdict state deterministically. Only the
-    external quote fetch is non-deterministic and is resolved with strict_eq.
-    """
+    """Trust-minimized judge for agent answers against relayed market data."""
 
     task_data: TreeMap[str, str]
     task_status: TreeMap[str, u8]
+    task_creator: TreeMap[str, Address]
     task_agent: TreeMap[str, str]
     task_answer: TreeMap[str, str]
     task_verdict: TreeMap[str, str]
     reputation: TreeMap[str, u32]
+    reputation_credited: TreeMap[str, bool]
     dispute_count: TreeMap[str, u32]
     task_nonce: u64
+    relayer_url: str
 
-    def __init__(self):
+    def __init__(self, relayer_url: str):
+        if relayer_url == "" or ".example" in relayer_url:
+            raise gl.vm.UserError("a real relayer_url is required")
         self.task_nonce = u64(0)
+        self.relayer_url = relayer_url.rstrip("/")
 
     @gl.public.write
     def create_task(self, prompt: str, reference_value: str, tolerance_bps: u32) -> str:
@@ -28,68 +30,63 @@ class AgentJudge(gl.Contract):
             raise gl.vm.UserError("tolerance_bps must be between 1 and 1000")
         task_id = "task-" + str(self.task_nonce)
         self.task_nonce += u64(1)
-        payload = json.dumps({
+        self.task_data[task_id] = json.dumps({
             "prompt": prompt,
             "reference_value": reference_value,
             "tolerance_bps": int(tolerance_bps),
         }, sort_keys=True)
-        self.task_data[task_id] = payload
         self.task_status[task_id] = u8(1)  # OPEN
+        self.task_creator[task_id] = gl.message.sender_address
         self.task_agent[task_id] = ""
         self.task_answer[task_id] = ""
         self.task_verdict[task_id] = "PENDING"
+        self.reputation_credited[task_id] = False
+        self.dispute_count[task_id] = u32(0)
         return task_id
 
     @gl.public.write
     def submit_answer(self, task_id: str, answer_value: str, agent_label: str) -> None:
         if self.task_status.get(task_id, u8(0)) != u8(1):
             raise gl.vm.UserError("task is not open")
-        if answer_value == "":
-            raise gl.vm.UserError("answer_value is required")
+        if answer_value == "" or agent_label == "":
+            raise gl.vm.UserError("answer_value and agent_label are required")
         self.task_agent[task_id] = agent_label
         self.task_answer[task_id] = answer_value
         self.task_status[task_id] = u8(2)  # ANSWERED
 
     def _quote_snapshot(self, pair: str, reference_value: str) -> str:
-        """External data must only run in a nondeterministic block.
-
-        The relayer endpoint is intentionally configurable at deployment time
-        through this contract constant. The endpoint returns a normalized
-        integer representation, keeping strict_eq deterministic after parsing.
-        """
-        url = "https://agent-judge-relayer.example/quote?pair=" + pair + "&reference=" + reference_value
+        url = self.relayer_url + "/quote?pair=" + pair + "&reference=" + reference_value
         response = gl.nondet.web.request(url, method="GET")
         body = response.body.decode("utf-8")
         data = json.loads(body)
-        # Only stable, normalized fields participate in consensus.
         return json.dumps({
             "pair": str(data["pair"]),
             "price_x1e6": int(data["price_x1e6"]),
             "source": str(data["source"]),
         }, sort_keys=True)
 
-    @gl.public.write
-    def evaluate(self, task_id: str, pair: str) -> str:
-        if self.task_status.get(task_id, u8(0)) != u8(2):
-            raise gl.vm.UserError("task must have a submitted answer")
-
+    def _evaluate(self, task_id: str, pair: str) -> str:
         task = json.loads(self.task_data[task_id])
         answer = float(self.task_answer[task_id])
         reference = float(task["reference_value"])
         tolerance_bps = int(task["tolerance_bps"])
 
-        # Snapshot is fetched only through the Equivalence Principle.
         snapshot_json = gl.eq_principle.strict_eq(
             lambda: self._quote_snapshot(pair, task["reference_value"])
         )
         snapshot = json.loads(snapshot_json)
         live_price = float(snapshot["price_x1e6"]) / 1_000_000.0
+        if live_price <= 0:
+            raise gl.vm.UserError("relayer returned an invalid price")
 
-        # Compare the submitted answer with the authoritative live value.
         diff_bps = abs(answer - live_price) / live_price * 10_000.0
-        # reference_value is retained as the task's declared benchmark for auditability.
         reference_check_bps = abs(live_price - reference) / live_price * 10_000.0
         accepted = diff_bps <= tolerance_bps
+        old_verdict = self.task_verdict.get(task_id, "PENDING")
+        old_accepted = False
+        if old_verdict != "PENDING":
+            old_accepted = bool(json.loads(old_verdict).get("accepted", False))
+
         verdict = {
             "accepted": accepted,
             "answer": answer,
@@ -99,24 +96,39 @@ class AgentJudge(gl.Contract):
             "reference_difference_bps": reference_check_bps,
             "tolerance_bps": tolerance_bps,
             "source": snapshot["source"],
+            "disputed": int(self.dispute_count.get(task_id, u32(0))) > 0,
         }
         self.task_verdict[task_id] = json.dumps(verdict, sort_keys=True)
         self.task_status[task_id] = u8(3) if accepted else u8(4)
 
         agent = self.task_agent[task_id]
-        if agent != "" and accepted:
+        if agent != "" and accepted and not old_accepted:
             self.reputation[agent] = self.reputation.get(agent, u32(0)) + u32(1)
+            self.reputation_credited[task_id] = True
+        elif agent != "" and old_accepted and not accepted and self.reputation_credited.get(task_id, False):
+            current = self.reputation.get(agent, u32(0))
+            if current > u32(0):
+                self.reputation[agent] = current - u32(1)
+            self.reputation_credited[task_id] = False
         return self.task_verdict[task_id]
 
     @gl.public.write
+    def evaluate(self, task_id: str, pair: str) -> str:
+        if self.task_status.get(task_id, u8(0)) != u8(2):
+            raise gl.vm.UserError("task must have a submitted answer")
+        return self._evaluate(task_id, pair)
+
+    @gl.public.write
     def dispute(self, task_id: str, pair: str) -> str:
+        if self.task_creator.get(task_id, Address("0x0000000000000000000000000000000000000000")) != gl.message.sender_address:
+            raise gl.vm.UserError("only the task creator can dispute")
         status = self.task_status.get(task_id, u8(0))
         if status != u8(3) and status != u8(4):
             raise gl.vm.UserError("only completed tasks can be disputed")
-        self.dispute_count[task_id] = self.dispute_count.get(task_id, u32(0)) + u32(1)
-        # Re-evaluation uses a newly fetched live snapshot. This is intentionally
-        # simple for MVP and avoids pretending an old external snapshot is final.
-        return self.evaluate(task_id, pair)
+        if self.dispute_count.get(task_id, u32(0)) != u32(0):
+            raise gl.vm.UserError("task has already been disputed")
+        self.dispute_count[task_id] = u32(1)
+        return self._evaluate(task_id, pair)
 
     @gl.public.view
     def get_task(self, task_id: str) -> str:
@@ -124,6 +136,7 @@ class AgentJudge(gl.Contract):
             "task_id": task_id,
             "data": self.task_data.get(task_id, ""),
             "status": int(self.task_status.get(task_id, u8(0))),
+            "creator": str(self.task_creator.get(task_id, Address("0x0000000000000000000000000000000000000000"))),
             "agent": self.task_agent.get(task_id, ""),
             "answer": self.task_answer.get(task_id, ""),
             "verdict": self.task_verdict.get(task_id, "PENDING"),
