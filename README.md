@@ -2,6 +2,14 @@
 
 A GenLayer Intelligent Contract that evaluates agent answers against an external market quote while keeping the final verdict and reputation logic on-chain.
 
+## Live relayer
+
+The Railway relayer is deployed at:
+
+`https://agent-judge-relayer-production.up.railway.app`
+
+Deploy the contract with that URL as the `relayer_url` constructor argument.
+
 ## Quality-bar mapping
 
 **1. Real trust problem**
@@ -10,31 +18,31 @@ Agent outputs can be wrong or stale. The judge obtains an external market refere
 
 **2. Intelligent Contract**
 
-The evaluation path uses `gl.eq_principle.strict_eq` around the external quote fetch. Only normalized quote data enters consensus.
+The core evaluation path is implemented as a Python GenLayer Intelligent Contract using `gl.eq_principle.strict_eq` around the external quote fetch.
 
-**3. Live authoritative data path**
+**3. Live or authoritative data path**
 
-The relayer now has a live Binance Spot adapter and returns normalized `price_x1e6` data. Mock mode remains available for local tests. The contract no longer contains the `agent-judge-relayer.example` placeholder. Its `relayer_url` is supplied at deployment time and rejects placeholder domains.
+The relayer provides the external quote boundary. Mock mode remains available for local development, while the deployed Railway service is configured for live mode.
 
 **4. Consensus-aware design**
 
-The quote fetch is isolated in the nondeterministic block. The verdict and tolerance calculation happen deterministically after strict equality.
+Only normalized, structured quote data participates in strict equality. The tolerance comparison is deterministic and happens after consensus.
 
 **5. Working app path**
 
-`frontend/index.html` provides the interaction surface. The relayer exposes `/health` and `/quote` for the external-data boundary.
+`frontend/index.html` provides the interaction surface. The contract API is explicit and ready to connect to GenLayerJS. The relayer exposes `/health` and `/quote` for the external-data boundary.
 
 **6. Risk disclosure**
 
-The relayer remains a trust boundary. Binance availability and symbol support are external dependencies. Multi-source validation and a stronger oracle model remain future work.
+Known limitations, provider dependence, relayer trust boundary, tolerance assumptions, reputation scope, and disputes are documented in `docs/architecture.md`.
 
-**7. Dispute and reputation safety**
+**7. Demonstrable testing**
 
-Tasks record their creator address. Only the task creator can dispute, and each task can be disputed once. A disputed verdict is re-evaluated through the same consensus path. Reputation is reconciled when a verdict changes, including removing a previously credited point when an accepted result becomes rejected.
+Static contract checks are included. Before submission, run them and execute a Studio integration flow for deployment, `create_task`, `submit_answer`, `evaluate`, `dispute`, and `get_task`.
 
-**8. Testing**
+**8. Continued-use path**
 
-`tests/test_contract_static.py` covers the four review scenarios: real relayer configuration, authorized one-shot disputes, reputation reconciliation after a verdict change, and the live relayer adapter. Run the tests before Studio validation.
+Reputation is persisted on-chain and exposed through `get_reputation`, while the architecture defines a path toward marketplace ranking and multi-source quote validation.
 
 ## Repository
 
@@ -47,7 +55,7 @@ tests/test_contract_static.py
 docs/architecture.md
 ```
 
-## Run the relayer
+## Run the relayer locally
 
 ```bash
 cd relayer
@@ -55,14 +63,14 @@ npm install
 npm start
 ```
 
-For local development use `QUOTE_MODE=mock`. For live quotes use `QUOTE_MODE=live` with the Binance API URL from `.env.example`.
+The local default mode is mock. The Railway deployment is configured separately for the live adapter.
 
 ## GenLayer Studio
 
-The constructor now requires the deployed relayer base URL:
+Load `contracts/agent_judge.py` into Studio and deploy it with:
 
 ```text
-AgentJudge(relayer_url)
+AgentJudge("https://agent-judge-relayer-production.up.railway.app")
 ```
 
 Then exercise:
@@ -76,7 +84,7 @@ get_task(task_id)
 get_reputation(agent_label)
 ```
 
-For a production submission, use the actual public HTTPS URL of the deployed relayer as `relayer_url`, then run the full Studio flow. The repository does not claim that a live deployment has been validated merely because the adapter exists.
+Do not claim a successful live verdict until the Studio integration flow has actually been executed against the deployed relayer.
 
 ## Testing
 
@@ -84,4 +92,4 @@ For a production submission, use the actual public HTTPS URL of the deployed rel
 python -m pytest tests -q
 ```
 
-For full GenLayer validation, also run the current GenLayer linter and Studio integration tests in an installed GenLayer environment.
+For full GenLayer validation, also run the current GenLayer linter and Studio-mode integration tests in an installed GenLayer environment.
