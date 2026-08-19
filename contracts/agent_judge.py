@@ -169,6 +169,10 @@ class AgentJudge(gl.Contract):
 
     @gl.public.view
     def get_task(self, task_id: str) -> str:
+        verdict = self.task_verdict.get(task_id, "PENDING")
+        if verdict != "PENDING":
+            verdict = json.loads(verdict)
+
         return json.dumps({
             "task_id": task_id,
             "data": self.task_data.get(task_id, ""),
@@ -176,7 +180,7 @@ class AgentJudge(gl.Contract):
             "creator": str(self.task_creator.get(task_id, Address("0x0000000000000000000000000000000000000000"))),
             "agent": self.task_agent.get(task_id, ""),
             "answer": self.task_answer.get(task_id, ""),
-            "verdict": self.task_verdict.get(task_id, "PENDING"),
+            "verdict": verdict,
             "disputes": int(self.dispute_count.get(task_id, u32(0))),
         }, sort_keys=True)
 
