@@ -14,7 +14,7 @@ def test_required_public_api_and_real_relayer_config():
         assert f'def {name}(' in src
     assert 'relayer_url: str' in src
     assert 'agent-judge-relayer.example' not in src
-    assert '.example' in src  # constructor rejects placeholder domains
+    assert '.example' in src
 
 
 def test_nondeterminism_is_isolated():
@@ -44,7 +44,10 @@ def test_reputation_reconciles_after_verdict_change():
 
 def test_live_relayer_has_real_upstream_adapter():
     src = RELAYER.read_text()
-    assert 'api.binance.com/api/v3/ticker/price' in src
+    assert 'api.binance.com/api/v3/ticker/24hr' in src
     assert 'source: \'binance-spot\'' in src
+    assert 'lastPrice' in src
+    assert 'closeTime' in src
+    assert 'MAX_QUOTE_AGE_MS' in src
     assert 'return json(res, 501' not in src
     assert 'price_x1e6: Math.round(price * 1e6)' in src
