@@ -71,13 +71,10 @@ class _FakeRuntime:
 
     nondet = _Nondet()
 
-    class _Eq:
+    class _EqPrinciple:
         @staticmethod
         def strict_eq(fn):
             return fn()
-
-    class _EqPrinciple:
-        strict_eq = _Eq.strict_eq
 
     eq_principle = _EqPrinciple()
 
