@@ -23,6 +23,15 @@ class AgentJudge(gl.Contract):
     def __init__(self, relayer_url: str):
         if relayer_url == "" or ".example" in relayer_url:
             raise gl.vm.UserError("a real relayer_url is required")
+        self.task_data = TreeMap()
+        self.task_status = TreeMap()
+        self.task_creator = TreeMap()
+        self.task_agent = TreeMap()
+        self.task_answer = TreeMap()
+        self.task_verdict = TreeMap()
+        self.reputation = TreeMap()
+        self.reputation_credited = TreeMap()
+        self.dispute_count = TreeMap()
         self.task_nonce = u64(0)
         self.relayer_url = relayer_url.rstrip("/")
 
@@ -37,7 +46,7 @@ class AgentJudge(gl.Contract):
             "reference_value": reference_value,
             "tolerance_bps": int(tolerance_bps),
         }, sort_keys=True)
-        self.task_status[task_id] = u8(1)  # OPEN
+        self.task_status[task_id] = u8(1)
         self.task_creator[task_id] = gl.message.sender_address
         self.task_agent[task_id] = ""
         self.task_answer[task_id] = ""
@@ -54,7 +63,7 @@ class AgentJudge(gl.Contract):
             raise gl.vm.UserError("answer_value and agent_label are required")
         self.task_agent[task_id] = agent_label
         self.task_answer[task_id] = answer_value
-        self.task_status[task_id] = u8(2)  # ANSWERED
+        self.task_status[task_id] = u8(2)
 
     def _normalize_pair(self, pair: str) -> str:
         return str(pair).upper().replace("/", "")
