@@ -15,6 +15,7 @@ def test_required_public_api_and_real_relayer_config():
     assert 'relayer_url: str' in src
     assert 'agent-judge-relayer.example' not in src
     assert '.example' in src
+    assert 'self.task_data = TreeMap()' in src
 
 
 def test_nondeterminism_is_isolated():
