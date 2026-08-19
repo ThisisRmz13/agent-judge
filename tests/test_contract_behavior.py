@@ -56,7 +56,11 @@ class _FakeRuntime:
     vm = _VM()
 
     class _Web:
-        response = _Response('{"pair":"ETH/USDC","price_x1e6":1906940000,"source":"binance-spot"}')
+        response = _Response(
+            '{"pair":"ETH/USDC","price_x1e6":1906940000,'
+            '"source":"binance-spot","timestamp_ms":1723900000000,'
+            '"age_ms":1000,"fresh":true}'
+        )
 
         @staticmethod
         def request(url, method="GET"):
@@ -155,9 +159,64 @@ def test_scenario_verdict_reversal_removes_prior_reputation_credit():
     assert contract.get_reputation("agent-d") == 1
 
     _FakeRuntime._Web.response = _Response(
-        '{"pair":"ETH/USDC","price_x1e6":2200000000,"source":"binance-spot"}'
+        '{"pair":"ETH/USDC","price_x1e6":2200000000,'
+        '"source":"binance-spot","timestamp_ms":1723900000000,'
+        '"age_ms":1000,"fresh":true}'
     )
     contract.dispute(task_id, "ETH/USDC")
 
     assert contract.get_reputation("agent-d") == 0
     assert '"accepted": false' in contract.get_task(task_id)
+
+
+def test_scenario_live_source_failure_is_rejected():
+    AgentJudge = load_contract()
+    _FakeRuntime.message.sender_address = _Address("creator")
+    contract = AgentJudge("https://agent-judge-relayer-production.up.railway.app")
+    task_id = contract.create_task("ETH price", "1906.94", 100)
+    contract.submit_answer(task_id, "1906.94", "agent-e")
+    _FakeRuntime._Web.response = _Response('{"error":"live quote request failed"}')
+
+    try:
+        contract.evaluate(task_id, "ETH/USDC")
+        assert False, "live-source failure must fail evaluation"
+    except (KeyError, _FakeRuntime.vm.UserError, ValueError):
+        pass
+
+
+def test_scenario_requested_pair_must_match_returned_pair():
+    AgentJudge = load_contract()
+    _FakeRuntime.message.sender_address = _Address("creator")
+    contract = AgentJudge("https://agent-judge-relayer-production.up.railway.app")
+    task_id = contract.create_task("BTC price", "60000", 100)
+    contract.submit_answer(task_id, "60000", "agent-f")
+    _FakeRuntime._Web.response = _Response(
+        '{"pair":"ETH/USDC","price_x1e6":1906940000,'
+        '"source":"binance-spot","timestamp_ms":1723900000000,'
+        '"age_ms":1000,"fresh":true}'
+    )
+
+    try:
+        contract.evaluate(task_id, "BTC/USDC")
+        assert False, "mismatched pair must fail"
+    except _FakeRuntime.vm.UserError as exc:
+        assert str(exc) == "relayer returned a different trading pair"
+
+
+def test_scenario_stale_quote_is_rejected():
+    AgentJudge = load_contract()
+    _FakeRuntime.message.sender_address = _Address("creator")
+    contract = AgentJudge("https://agent-judge-relayer-production.up.railway.app")
+    task_id = contract.create_task("ETH price", "1906.94", 100)
+    contract.submit_answer(task_id, "1906.94", "agent-g")
+    _FakeRuntime._Web.response = _Response(
+        '{"pair":"ETH/USDC","price_x1e6":1906940000,'
+        '"source":"binance-spot","timestamp_ms":1723900000000,'
+        '"age_ms":60001,"fresh":false}'
+    )
+
+    try:
+        contract.evaluate(task_id, "ETH/USDC")
+        assert False, "stale quote must fail"
+    except _FakeRuntime.vm.UserError as exc:
+        assert str(exc) == "relayer returned a stale quote"
