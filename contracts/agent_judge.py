@@ -6,6 +6,8 @@ import json
 class AgentJudge(gl.Contract):
     """Trust-minimized judge for agent answers against relayed market data."""
 
+    MAX_QUOTE_AGE_MS = 60_000
+
     task_data: TreeMap[str, str]
     task_status: TreeMap[str, u8]
     task_creator: TreeMap[str, Address]
@@ -54,15 +56,39 @@ class AgentJudge(gl.Contract):
         self.task_answer[task_id] = answer_value
         self.task_status[task_id] = u8(2)  # ANSWERED
 
+    def _normalize_pair(self, pair: str) -> str:
+        return str(pair).upper().replace("/", "")
+
     def _quote_snapshot(self, pair: str, reference_value: str) -> str:
+        requested_pair = self._normalize_pair(pair)
+        if requested_pair == "":
+            raise gl.vm.UserError("pair is required")
         url = self.relayer_url + "/quote?pair=" + pair + "&reference=" + reference_value
         response = gl.nondet.web.request(url, method="GET")
         body = response.body.decode("utf-8")
         data = json.loads(body)
+
+        returned_pair = self._normalize_pair(str(data.get("pair", "")))
+        if returned_pair != requested_pair:
+            raise gl.vm.UserError("relayer returned a different trading pair")
+        if str(data.get("source", "")) != "binance-spot":
+            raise gl.vm.UserError("quote source is not the approved live source")
+        if not bool(data.get("fresh", False)):
+            raise gl.vm.UserError("relayer returned a stale quote")
+        age_ms = int(data.get("age_ms", self.MAX_QUOTE_AGE_MS + 1))
+        if age_ms < 0 or age_ms > self.MAX_QUOTE_AGE_MS:
+            raise gl.vm.UserError("relayer returned a stale quote")
+        timestamp_ms = int(data.get("timestamp_ms", 0))
+        if timestamp_ms <= 0:
+            raise gl.vm.UserError("relayer returned an invalid quote timestamp")
+
         return json.dumps({
             "pair": str(data["pair"]),
             "price_x1e6": int(data["price_x1e6"]),
             "source": str(data["source"]),
+            "timestamp_ms": timestamp_ms,
+            "age_ms": age_ms,
+            "fresh": True,
         }, sort_keys=True)
 
     def _evaluate(self, task_id: str, pair: str) -> str:
@@ -96,6 +122,8 @@ class AgentJudge(gl.Contract):
             "reference_difference_bps": reference_check_bps,
             "tolerance_bps": tolerance_bps,
             "source": snapshot["source"],
+            "quote_timestamp_ms": snapshot["timestamp_ms"],
+            "quote_age_ms": snapshot["age_ms"],
             "disputed": int(self.dispute_count.get(task_id, u32(0))) > 0,
         }
         self.task_verdict[task_id] = json.dumps(verdict, sort_keys=True)
