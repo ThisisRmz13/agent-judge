@@ -67,7 +67,7 @@ class _FakeRuntime:
             return _FakeRuntime._Web.response
 
     class _Nondet:
-        web = _Web()
+        pass
 
     nondet = _Nondet()
 
@@ -80,6 +80,9 @@ class _FakeRuntime:
         strict_eq = _Eq.strict_eq
 
     eq_principle = _EqPrinciple()
+
+
+_FakeRuntime._Nondet.web = _FakeRuntime._Web()
 
 
 def load_contract():
