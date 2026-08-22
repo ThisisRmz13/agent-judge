@@ -3,6 +3,8 @@ import sys
 import types
 from pathlib import Path
 
+import pytest
+
 
 CONTRACT = Path(__file__).parents[1] / "contracts" / "agent_judge.py"
 
@@ -18,6 +20,13 @@ class _Address(str):
 class _Response:
     def __init__(self, body):
         self.body = body.encode("utf-8")
+
+
+_DEFAULT_RESPONSE = (
+    '{"pair":"ETH/USDC","price_x1e6":1906940000,'
+    '"source":"binance-spot","timestamp_ms":1723900000000,'
+    '"age_ms":1000,"fresh":true}'
+)
 
 
 class _FakeRuntime:
@@ -56,11 +65,7 @@ class _FakeRuntime:
     vm = _VM()
 
     class _Web:
-        response = _Response(
-            '{"pair":"ETH/USDC","price_x1e6":1906940000,'
-            '"source":"binance-spot","timestamp_ms":1723900000000,'
-            '"age_ms":1000,"fresh":true}'
-        )
+        response = _Response(_DEFAULT_RESPONSE)
 
         @staticmethod
         def request(url, method="GET"):
@@ -73,13 +78,19 @@ class _FakeRuntime:
 
     class _EqPrinciple:
         @staticmethod
-        def strict_eq(fn):
+        def prompt_comparative(fn, principle=""):
             return fn()
 
     eq_principle = _EqPrinciple()
 
 
 _FakeRuntime._Nondet.web = _FakeRuntime._Web()
+
+
+@pytest.fixture(autouse=True)
+def reset_fake_runtime_state():
+    _FakeRuntime._Web.response = _Response(_DEFAULT_RESPONSE)
+    _FakeRuntime.message.sender_address = _Address("creator")
 
 
 def load_contract():
@@ -100,7 +111,6 @@ def load_contract():
 
 def test_scenario_accepted_answer_credits_reputation():
     AgentJudge = load_contract()
-    _FakeRuntime.message.sender_address = _Address("creator")
     contract = AgentJudge("https://agent-judge-relayer-production.up.railway.app")
 
     task_id = contract.create_task("ETH price", "1906.94", 100)
@@ -113,7 +123,6 @@ def test_scenario_accepted_answer_credits_reputation():
 
 def test_scenario_wrong_answer_does_not_credit_reputation():
     AgentJudge = load_contract()
-    _FakeRuntime.message.sender_address = _Address("creator")
     contract = AgentJudge("https://agent-judge-relayer-production.up.railway.app")
 
     task_id = contract.create_task("ETH price", "1906.94", 100)
@@ -127,7 +136,6 @@ def test_scenario_wrong_answer_does_not_credit_reputation():
 def test_scenario_dispute_requires_creator_and_is_one_shot():
     AgentJudge = load_contract()
     contract = AgentJudge("https://agent-judge-relayer-production.up.railway.app")
-    _FakeRuntime.message.sender_address = _Address("creator")
     task_id = contract.create_task("ETH price", "1906.94", 100)
     contract.submit_answer(task_id, "1906.94", "agent-c")
     contract.evaluate(task_id, "ETH/USDC")
@@ -150,7 +158,6 @@ def test_scenario_dispute_requires_creator_and_is_one_shot():
 
 def test_scenario_verdict_reversal_removes_prior_reputation_credit():
     AgentJudge = load_contract()
-    _FakeRuntime.message.sender_address = _Address("creator")
     contract = AgentJudge("https://agent-judge-relayer-production.up.railway.app")
 
     task_id = contract.create_task("ETH price", "1906.94", 100)
@@ -171,22 +178,17 @@ def test_scenario_verdict_reversal_removes_prior_reputation_credit():
 
 def test_scenario_live_source_failure_is_rejected():
     AgentJudge = load_contract()
-    _FakeRuntime.message.sender_address = _Address("creator")
     contract = AgentJudge("https://agent-judge-relayer-production.up.railway.app")
     task_id = contract.create_task("ETH price", "1906.94", 100)
     contract.submit_answer(task_id, "1906.94", "agent-e")
     _FakeRuntime._Web.response = _Response('{"error":"live quote request failed"}')
 
-    try:
+    with pytest.raises(_FakeRuntime.vm.UserError, match="missing required fields"):
         contract.evaluate(task_id, "ETH/USDC")
-        assert False, "live-source failure must fail evaluation"
-    except (KeyError, _FakeRuntime.vm.UserError, ValueError):
-        pass
 
 
 def test_scenario_requested_pair_must_match_returned_pair():
     AgentJudge = load_contract()
-    _FakeRuntime.message.sender_address = _Address("creator")
     contract = AgentJudge("https://agent-judge-relayer-production.up.railway.app")
     task_id = contract.create_task("BTC price", "60000", 100)
     contract.submit_answer(task_id, "60000", "agent-f")
@@ -196,16 +198,12 @@ def test_scenario_requested_pair_must_match_returned_pair():
         '"age_ms":1000,"fresh":true}'
     )
 
-    try:
+    with pytest.raises(_FakeRuntime.vm.UserError, match="different trading pair"):
         contract.evaluate(task_id, "BTC/USDC")
-        assert False, "mismatched pair must fail"
-    except _FakeRuntime.vm.UserError as exc:
-        assert str(exc) == "relayer returned a different trading pair"
 
 
 def test_scenario_stale_quote_is_rejected():
     AgentJudge = load_contract()
-    _FakeRuntime.message.sender_address = _Address("creator")
     contract = AgentJudge("https://agent-judge-relayer-production.up.railway.app")
     task_id = contract.create_task("ETH price", "1906.94", 100)
     contract.submit_answer(task_id, "1906.94", "agent-g")
@@ -215,8 +213,32 @@ def test_scenario_stale_quote_is_rejected():
         '"age_ms":60001,"fresh":false}'
     )
 
-    try:
+    with pytest.raises(_FakeRuntime.vm.UserError, match="stale quote"):
         contract.evaluate(task_id, "ETH/USDC")
-        assert False, "stale quote must fail"
-    except _FakeRuntime.vm.UserError as exc:
-        assert str(exc) == "relayer returned a stale quote"
+
+
+def test_scenario_malformed_response_is_rejected():
+    AgentJudge = load_contract()
+    contract = AgentJudge("https://agent-judge-relayer-production.up.railway.app")
+    task_id = contract.create_task("ETH price", "1906.94", 100)
+    contract.submit_answer(task_id, "1906.94", "agent-h")
+
+    _FakeRuntime._Web.response = _Response('{"pair":"ETH/USDC", "price_x1e6": ')
+
+    with pytest.raises(_FakeRuntime.vm.UserError, match="malformed JSON"):
+        contract.evaluate(task_id, "ETH/USDC")
+
+
+def test_scenario_malformed_missing_fields_is_rejected():
+    AgentJudge = load_contract()
+    contract = AgentJudge("https://agent-judge-relayer-production.up.railway.app")
+    task_id = contract.create_task("ETH price", "1906.94", 100)
+    contract.submit_answer(task_id, "1906.94", "agent-i")
+
+    _FakeRuntime._Web.response = _Response(
+        '{"pair":"ETH/USDC","source":"binance-spot",'
+        '"fresh":true,"age_ms":100}'
+    )
+
+    with pytest.raises(_FakeRuntime.vm.UserError, match="missing required fields"):
+        contract.evaluate(task_id, "ETH/USDC")
