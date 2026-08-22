@@ -12,9 +12,11 @@ The relayer is a transport adapter. It does not decide whether an answer passes,
 
 ## Consensus design
 
-Each validator independently executes the external quote request inside the `strict_eq` boundary. The returned payload is reduced to stable normalized fields: trading pair, integer price in 1e-6 units, and source identifier. JSON keys are sorted before comparison.
+Each validator independently executes the external quote request inside the `prompt_comparative` equivalence principle. The returned payload is compared as a normalized quote rather than by strict equality. The trading pair and source identifier must match exactly across validator results. The live `price_x1e6` value may differ by up to 50 basis points (0.5%) because validators fetch the live quote independently and legitimate market movement can occur between fetches. `timestamp_ms` and `age_ms` may also differ between validators, provided each result satisfies the contract's freshness window.
 
-The contract then performs the tolerance comparison deterministically after consensus returns. A submission passes when its value is within `tolerance_bps` of the agreed live quote.
+This comparative equivalence is intentionally limited to the expected volatility of the live quote. It does not permit a different trading pair, a different quote source, or a stale response to reach consensus.
+
+The contract then performs the task-specific answer tolerance comparison deterministically after consensus returns. A submission passes when its value is within `tolerance_bps` of the agreed live quote.
 
 This follows the GenLayer requirement that `gl.nondet.web.*` calls live inside an Equivalence Principle function, while deterministic state changes occur outside that non-deterministic block.
 
@@ -26,9 +28,9 @@ The relayer is therefore an operational trust boundary, not a decision-making au
 
 ## Tolerance choice
 
-The MVP exposes tolerance as a task parameter in basis points. The reference implementation uses 50 bps in the demo, but this value is a configurable assumption, not a claim that 0.5% is universally safe.
+The MVP exposes tolerance as a task parameter in basis points. The consensus layer separately allows up to 50 bps of legitimate live-quote movement between independent validator fetches. The task tolerance controls whether the submitted answer is accepted against the agreed quote.
 
-A production configuration should benchmark repeated quotes during realistic volatility and choose a tolerance from observed provider variance, expected market movement, and the acceptable false-reject rate. A live benchmark requires provider credentials and is intentionally not faked by this repository.
+A production configuration should benchmark repeated quotes during realistic volatility and choose a task tolerance from observed provider variance, expected market movement, and the acceptable false-reject rate. A live benchmark requires provider credentials and is intentionally not faked by this repository.
 
 ## Known limitations and future hardening
 
@@ -52,8 +54,8 @@ A production version should query at least one additional source, such as anothe
 
 1. A user creates a task with a reference value and tolerance.
 2. An agent submits an answer.
-3. Validators independently obtain the external quote inside `strict_eq`.
-4. Consensus returns one normalized quote.
+3. Validators independently obtain the external quote inside `prompt_comparative`.
+4. Consensus accepts equivalent live quotes when pair and source match exactly, price movement is within 50 bps, and each quote is fresh.
 5. The contract compares the answer with the agreed quote.
 6. A passing answer increments the agent's reputation counter.
 7. A completed task can be disputed and re-evaluated with fresh data.
