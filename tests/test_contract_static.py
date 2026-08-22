@@ -21,8 +21,16 @@ def test_required_public_api_and_real_relayer_config():
 def test_nondeterminism_is_isolated():
     src = read_contract()
     assert 'gl.nondet.web.request' in src
-    assert 'gl.eq_principle.strict_eq' in src
+    assert 'gl.eq_principle.prompt_comparative' in src
+    assert 'gl.eq_principle.strict_eq' not in src
     assert 'storage' not in src.split('def _quote_snapshot', 1)[1].split('def _evaluate', 1)[0]
+
+
+def test_validator_agreement_tolerates_quote_movement():
+    src = read_contract()
+    assert 'gl.eq_principle.prompt_comparative' in src
+    assert '50 basis points' in src or '50 bps' in src.lower()
+    assert 'pair' in src and 'source' in src
 
 
 def test_dispute_is_authorized_and_one_shot():
