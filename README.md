@@ -18,7 +18,7 @@ Agent outputs can be wrong or stale. The judge obtains an external market refere
 
 **2. Intelligent Contract**
 
-The core evaluation path is implemented as a Python GenLayer Intelligent Contract using `gl.eq_principle.strict_eq` around the external quote fetch.
+The core evaluation path is implemented as a Python GenLayer Intelligent Contract using `gl.eq_principle.prompt_comparative` around the external quote fetch, with a tolerance of 50 basis points on price so that legitimate market movement between independent validator fetches does not break consensus.
 
 **3. Live or authoritative data path**
 
@@ -26,7 +26,7 @@ The relayer provides the external quote boundary. Mock mode remains available fo
 
 **4. Consensus-aware design**
 
-Only normalized, structured quote data participates in strict equality. The tolerance comparison is deterministic and happens after consensus.
+Only normalized, structured quote data participates in the comparative equivalence check: the trading pair and source must match exactly, while the price is allowed to differ by up to 50 basis points and timing metadata is allowed to differ between validators as long as each independently satisfies the freshness window. The tolerance comparison against the agent's submitted answer is deterministic and happens after consensus.
 
 **5. Working app path**
 
@@ -38,7 +38,7 @@ Known limitations, provider dependence, relayer trust boundary, tolerance assump
 
 **7. Demonstrable testing**
 
-Static contract checks are included. Before submission, run them and execute a Studio integration flow for deployment, `create_task`, `submit_answer`, `evaluate`, `dispute`, and `get_task`.
+Static and behavioral contract checks are included, covering pair mismatches, stale quotes, malformed relayer responses, live-source failures, dispute authorization, and reputation reconciliation. Before submission, run them and execute a Studio integration flow for deployment, `create_task`, `submit_answer`, `evaluate`, `dispute`, and `get_task`.
 
 **8. Continued-use path**
 
@@ -52,6 +52,7 @@ relayer/server.js
 relayer/.env.example
 frontend/index.html
 tests/test_contract_static.py
+tests/test_contract_behavior.py
 docs/architecture.md
 ```
 
