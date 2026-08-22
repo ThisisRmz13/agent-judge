@@ -74,26 +74,49 @@ class AgentJudge(gl.Contract):
             raise gl.vm.UserError("pair is required")
         url = self.relayer_url + "/quote?pair=" + pair + "&reference=" + reference_value
         response = gl.nondet.web.request(url, method="GET")
-        body = response.body.decode("utf-8")
-        data = json.loads(body)
+        try:
+            body = response.body.decode("utf-8")
+            data = json.loads(body)
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            raise gl.vm.UserError("relayer returned malformed JSON")
 
-        returned_pair = self._normalize_pair(str(data.get("pair", "")))
+        if not isinstance(data, dict):
+            raise gl.vm.UserError("relayer response is malformed")
+
+        required_fields = {
+            "pair",
+            "price_x1e6",
+            "source",
+            "timestamp_ms",
+            "age_ms",
+            "fresh",
+        }
+        if not required_fields.issubset(data):
+            raise gl.vm.UserError("relayer response is missing required fields")
+
+        returned_pair = self._normalize_pair(str(data["pair"]))
         if returned_pair != requested_pair:
             raise gl.vm.UserError("relayer returned a different trading pair")
-        if str(data.get("source", "")) != "binance-spot":
+        if str(data["source"]) != "binance-spot":
             raise gl.vm.UserError("quote source is not the approved live source")
-        if not bool(data.get("fresh", False)):
+        if not bool(data["fresh"]):
             raise gl.vm.UserError("relayer returned a stale quote")
-        age_ms = int(data.get("age_ms", self.MAX_QUOTE_AGE_MS + 1))
+        try:
+            age_ms = int(data["age_ms"])
+            timestamp_ms = int(data["timestamp_ms"])
+            price_x1e6 = int(data["price_x1e6"])
+        except (TypeError, ValueError):
+            raise gl.vm.UserError("relayer response contains invalid numeric fields")
         if age_ms < 0 or age_ms > self.MAX_QUOTE_AGE_MS:
             raise gl.vm.UserError("relayer returned a stale quote")
-        timestamp_ms = int(data.get("timestamp_ms", 0))
         if timestamp_ms <= 0:
             raise gl.vm.UserError("relayer returned an invalid quote timestamp")
+        if price_x1e6 <= 0:
+            raise gl.vm.UserError("relayer returned an invalid price")
 
         return json.dumps({
             "pair": str(data["pair"]),
-            "price_x1e6": int(data["price_x1e6"]),
+            "price_x1e6": price_x1e6,
             "source": str(data["source"]),
             "timestamp_ms": timestamp_ms,
             "age_ms": age_ms,
@@ -106,8 +129,24 @@ class AgentJudge(gl.Contract):
         reference = float(task["reference_value"])
         tolerance_bps = int(task["tolerance_bps"])
 
-        snapshot_json = gl.eq_principle.strict_eq(
-            lambda: self._quote_snapshot(pair, task["reference_value"])
+        snapshot_json = gl.eq_principle.prompt_comparative(
+            lambda: self._quote_snapshot(pair, task["reference_value"]),
+            principle="""
+            Both results are a JSON object describing one market quote.
+            The 'pair' field must match exactly.
+            The 'source' field must match exactly.
+            The 'price_x1e6' values may differ by up to 50 basis points
+            (0.5 percent) of either value, since each validator fetches
+            the live quote independently and normal market movement
+            between two fetches is expected and acceptable.
+            The 'timestamp_ms' and 'age_ms' values may differ between
+            validators, since each one fetches at a slightly different
+            moment; this is expected as long as both values already
+            satisfy the freshness window enforced before this comparison.
+            The 'fresh' field must be true in both.
+            Reject as non-equivalent if the pair or source differ, or if
+            the price difference exceeds the stated tolerance.
+            """,
         )
         snapshot = json.loads(snapshot_json)
         live_price = float(snapshot["price_x1e6"]) / 1_000_000.0
