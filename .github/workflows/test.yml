@@ -15,3 +15,15 @@ jobs:
           python-version: '3.11'
       - run: python -m pip install -r requirements.txt
       - run: pytest -v
+
+  relayer:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm install
+        working-directory: relayer
+      - run: npm test
+        working-directory: relayer
