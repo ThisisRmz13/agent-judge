@@ -1,4 +1,5 @@
 import importlib.util
+import json
 import sys
 import types
 from datetime import datetime, timezone
@@ -84,10 +85,13 @@ def test_scenario_wrong_answer_does_not_credit_reputation():
     assert '"accepted": false' in c.evaluate(tid); assert c.get_reputation("agent-b") == 0
 
 def test_scenario_task_pair_is_bound():
-    c = make_contract(); tid = c.create_task("BTC price", "60000", 100, "BTC/USDC")
+    c = make_contract()
+    tid = c.create_task("BTC price", "60000", 100, "BTC/USDC")
     stored = c.task_data[tid]
     assert '"pair": "BTCUSDC"' in stored
-    assert '"pair": "BTCUSDC"' in c.get_task(tid)
+    task = json.loads(c.get_task(tid))
+    data = json.loads(task["data"])
+    assert data["pair"] == "BTCUSDC"
 
 def test_scenario_dispute_requires_creator_and_is_one_shot():
     c = make_contract(); tid = create_eth_task(c); c.submit_answer(tid, "1906.94", "agent-c"); c.evaluate(tid)
@@ -141,7 +145,6 @@ def test_scenario_reference_mismatch_is_rejected():
 
 def test_scenario_reference_and_pair_are_url_encoded():
     c = make_contract()
-    c._quote_snapshot("ETH/USDC & test", "1906.94+foo&bar") if False else None
     _FakeRuntime._Web.response = _Response('{"pair":"ETH/USDC & TEST","price_x1e6":1906940000,"source":"binance-spot","timestamp_ms":1723900000000,"age_ms":1000,"fresh":true,"reference":"1906.94+foo&bar"}')
     c._quote_snapshot("ETH/USDC & test", "1906.94+foo&bar")
     assert "pair=ETH%2FUSDC%20%26%20test" in _FakeRuntime._Web.captured_url
