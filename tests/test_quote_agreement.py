@@ -13,6 +13,7 @@ def _quote(price):
         "timestamp_ms": 1723900000000,
         "age_ms": 1000,
         "fresh": True,
+        "reference": "1906.94",
     }))
 
 
@@ -27,7 +28,7 @@ def reset_runtime():
 
 def _run_with_two_quotes(first_price, second_price):
     contract = make_contract()
-    task_id = contract.create_task("ETH price", "1906.94", 100)
+    task_id = contract.create_task("ETH price", "1906.94", 100, "ETH/USDC")
     contract.submit_answer(task_id, "1906.94", "agent-movement")
 
     responses = iter([_quote(first_price), _quote(second_price)])
@@ -49,7 +50,7 @@ def _run_with_two_quotes(first_price, second_price):
         return json.dumps(first)
 
     _FakeRuntime.eq_principle.prompt_comparative = staticmethod(comparative)
-    return contract.evaluate(task_id, "ETH/USDC"), captured["principle"]
+    return contract.evaluate(task_id), captured["principle"]
 
 
 def test_validator_agreement_accepts_legitimate_quote_movement():
@@ -58,6 +59,7 @@ def test_validator_agreement_accepts_legitimate_quote_movement():
     assert "50 bps" in principle
     assert "pair" in principle
     assert "source" in principle
+    assert "reference" in principle
     assert "Timestamp and age" in principle
     assert "freshness" in principle
 
