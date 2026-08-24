@@ -58,8 +58,8 @@ def test_validator_agreement_accepts_legitimate_quote_movement():
     assert "50 bps" in principle
     assert "pair" in principle
     assert "source" in principle
-    assert "timestamp_ms" in principle
-    assert "age_ms" in principle
+    assert "Timestamp and age" in principle
+    assert "freshness" in principle
 
 
 def test_validator_agreement_rejects_excessive_quote_movement():
