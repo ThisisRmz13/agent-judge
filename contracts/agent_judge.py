@@ -23,15 +23,6 @@ class AgentJudge(gl.Contract):
     def __init__(self, relayer_url: str):
         if relayer_url == "" or ".example" in relayer_url:
             raise gl.vm.UserError("a real relayer_url is required")
-        self.task_data = TreeMap()
-        self.task_status = TreeMap()
-        self.task_creator = TreeMap()
-        self.task_agent = TreeMap()
-        self.task_answer = TreeMap()
-        self.task_verdict = TreeMap()
-        self.reputation = TreeMap()
-        self.reputation_credited = TreeMap()
-        self.dispute_count = TreeMap()
         self.task_nonce = u64(0)
         self.relayer_url = relayer_url.rstrip("/")
 
@@ -41,11 +32,7 @@ class AgentJudge(gl.Contract):
             raise gl.vm.UserError("tolerance_bps must be between 1 and 1000")
         task_id = "task-" + str(self.task_nonce)
         self.task_nonce += u64(1)
-        self.task_data[task_id] = json.dumps({
-            "prompt": prompt,
-            "reference_value": reference_value,
-            "tolerance_bps": int(tolerance_bps),
-        }, sort_keys=True)
+        self.task_data[task_id] = json.dumps({"prompt": prompt, "reference_value": reference_value, "tolerance_bps": int(tolerance_bps)}, sort_keys=True)
         self.task_status[task_id] = u8(1)
         self.task_creator[task_id] = gl.message.sender_address
         self.task_agent[task_id] = ""
@@ -79,21 +66,11 @@ class AgentJudge(gl.Contract):
             data = json.loads(body)
         except (UnicodeDecodeError, json.JSONDecodeError):
             raise gl.vm.UserError("relayer returned malformed JSON")
-
         if not isinstance(data, dict):
             raise gl.vm.UserError("relayer response is malformed")
-
-        required_fields = {
-            "pair",
-            "price_x1e6",
-            "source",
-            "timestamp_ms",
-            "age_ms",
-            "fresh",
-        }
+        required_fields = {"pair", "price_x1e6", "source", "timestamp_ms", "age_ms", "fresh"}
         if not required_fields.issubset(data):
             raise gl.vm.UserError("relayer response is missing required fields")
-
         returned_pair = self._normalize_pair(str(data["pair"]))
         if returned_pair != requested_pair:
             raise gl.vm.UserError("relayer returned a different trading pair")
@@ -113,70 +90,34 @@ class AgentJudge(gl.Contract):
             raise gl.vm.UserError("relayer returned an invalid quote timestamp")
         if price_x1e6 <= 0:
             raise gl.vm.UserError("relayer returned an invalid price")
-
-        return json.dumps({
-            "pair": str(data["pair"]),
-            "price_x1e6": price_x1e6,
-            "source": str(data["source"]),
-            "timestamp_ms": timestamp_ms,
-            "age_ms": age_ms,
-            "fresh": True,
-        }, sort_keys=True)
+        return json.dumps({"pair": str(data["pair"]), "price_x1e6": price_x1e6, "source": str(data["source"]), "timestamp_ms": timestamp_ms, "age_ms": age_ms, "fresh": True}, sort_keys=True)
 
     def _evaluate(self, task_id: str, pair: str) -> str:
         task = json.loads(self.task_data[task_id])
         answer = float(self.task_answer[task_id])
         reference = float(task["reference_value"])
         tolerance_bps = int(task["tolerance_bps"])
-
         snapshot_json = gl.eq_principle.prompt_comparative(
             lambda: self._quote_snapshot(pair, task["reference_value"]),
             principle="""
             Both results are a JSON object describing one market quote.
-            The 'pair' field must match exactly.
-            The 'source' field must match exactly.
-            The 'price_x1e6' values may differ by up to 50 basis points
-            (0.5 percent) of either value, since each validator fetches
-            the live quote independently and normal market movement
-            between two fetches is expected and acceptable.
-            The 'timestamp_ms' and 'age_ms' values may differ between
-            validators, since each one fetches at a slightly different
-            moment; this is expected as long as both values already
-            satisfy the freshness window enforced before this comparison.
-            The 'fresh' field must be true in both.
-            Reject as non-equivalent if the pair or source differ, or if
-            the price difference exceeds the stated tolerance.
+            The pair and source must match. Price values may differ by up to 50 bps because validators fetch independently.
+            Timestamp and age may differ because validators fetch at different moments, provided freshness was enforced.
+            Reject if pair or source differ, fresh is false, or price difference exceeds 50 bps.
             """,
         )
         snapshot = json.loads(snapshot_json)
         live_price = float(snapshot["price_x1e6"]) / 1_000_000.0
         if live_price <= 0:
             raise gl.vm.UserError("relayer returned an invalid price")
-
         diff_bps = abs(answer - live_price) / live_price * 10_000.0
         reference_check_bps = abs(live_price - reference) / live_price * 10_000.0
         accepted = diff_bps <= tolerance_bps
         old_verdict = self.task_verdict.get(task_id, "PENDING")
-        old_accepted = False
-        if old_verdict != "PENDING":
-            old_accepted = bool(json.loads(old_verdict).get("accepted", False))
-
-        verdict = {
-            "accepted": accepted,
-            "answer": answer,
-            "live_price": live_price,
-            "reference_value": reference,
-            "difference_bps": diff_bps,
-            "reference_difference_bps": reference_check_bps,
-            "tolerance_bps": tolerance_bps,
-            "source": snapshot["source"],
-            "quote_timestamp_ms": snapshot["timestamp_ms"],
-            "quote_age_ms": snapshot["age_ms"],
-            "disputed": int(self.dispute_count.get(task_id, u32(0))) > 0,
-        }
+        old_accepted = False if old_verdict == "PENDING" else bool(json.loads(old_verdict).get("accepted", False))
+        verdict = {"accepted": accepted, "answer": answer, "live_price": live_price, "reference_value": reference, "difference_bps": diff_bps, "reference_difference_bps": reference_check_bps, "tolerance_bps": tolerance_bps, "source": snapshot["source"], "quote_timestamp_ms": snapshot["timestamp_ms"], "quote_age_ms": snapshot["age_ms"], "disputed": int(self.dispute_count.get(task_id, u32(0))) > 0}
         self.task_verdict[task_id] = json.dumps(verdict, sort_keys=True)
         self.task_status[task_id] = u8(3) if accepted else u8(4)
-
         agent = self.task_agent[task_id]
         if agent != "" and accepted and not old_accepted:
             self.reputation[agent] = self.reputation.get(agent, u32(0)) + u32(1)
@@ -211,17 +152,7 @@ class AgentJudge(gl.Contract):
         verdict = self.task_verdict.get(task_id, "PENDING")
         if verdict != "PENDING":
             verdict = json.loads(verdict)
-
-        return json.dumps({
-            "task_id": task_id,
-            "data": self.task_data.get(task_id, ""),
-            "status": int(self.task_status.get(task_id, u8(0))),
-            "creator": str(self.task_creator.get(task_id, Address("0x0000000000000000000000000000000000000000"))),
-            "agent": self.task_agent.get(task_id, ""),
-            "answer": self.task_answer.get(task_id, ""),
-            "verdict": verdict,
-            "disputes": int(self.dispute_count.get(task_id, u32(0))),
-        }, sort_keys=True)
+        return json.dumps({"task_id": task_id, "data": self.task_data.get(task_id, ""), "status": int(self.task_status.get(task_id, u8(0))), "creator": str(self.task_creator.get(task_id, Address("0x0000000000000000000000000000000000000000"))), "agent": self.task_agent.get(task_id, ""), "answer": self.task_answer.get(task_id, ""), "verdict": verdict, "disputes": int(self.dispute_count.get(task_id, u32(0)))}, sort_keys=True)
 
     @gl.public.view
     def get_reputation(self, agent_label: str) -> u32:
