@@ -38,7 +38,7 @@ Known limitations, provider dependence, relayer trust boundary, tolerance assump
 
 **7. Demonstrable testing**
 
-Static and behavioral contract checks are included, covering pair mismatches, stale quotes, malformed relayer responses, live-source failures, dispute authorization, and reputation reconciliation. Before submission, run them and execute a Studio integration flow for deployment, `create_task`, `submit_answer`, `evaluate`, `dispute`, and `get_task`.
+Static and behavioral contract checks are included, covering pair mismatches, stale quotes, malformed relayer responses, live-source failures, dispute authorization, and reputation reconciliation. The relayer suite additionally tests upstream HTTP failures, malformed upstream JSON, returned-symbol mismatch, stale quotes, and valid fresh quotes. The validator agreement suite tests both legitimate and excessive quote movement.
 
 **8. Continued-use path**
 
@@ -49,10 +49,11 @@ Reputation is persisted on-chain and exposed through `get_reputation`, while the
 ```text
 contracts/agent_judge.py
 relayer/server.js
-relayer/.env.example
+relayer/server.test.js
 frontend/index.html
 tests/test_contract_static.py
 tests/test_contract_behavior.py
+tests/test_quote_agreement.py
 docs/architecture.md
 ```
 
@@ -61,6 +62,7 @@ docs/architecture.md
 ```bash
 cd relayer
 npm install
+npm test
 npm start
 ```
 
