@@ -109,57 +109,59 @@ def load_contract():
     return module.AgentJudge
 
 
-def test_scenario_accepted_answer_credits_reputation():
+def make_contract():
     AgentJudge = load_contract()
     contract = AgentJudge("https://agent-judge-relayer-production.up.railway.app")
+    # GenVM zero-initializes declared persistent fields. The direct-mode fake
+    # does not provide that runtime behavior, so mirror it explicitly here.
+    contract.task_data = _TreeMap()
+    contract.task_status = _TreeMap()
+    contract.task_creator = _TreeMap()
+    contract.task_agent = _TreeMap()
+    contract.task_answer = _TreeMap()
+    contract.task_verdict = _TreeMap()
+    contract.reputation = _TreeMap()
+    contract.reputation_credited = _TreeMap()
+    contract.dispute_count = _TreeMap()
+    return contract
 
+
+def test_scenario_accepted_answer_credits_reputation():
+    contract = make_contract()
     task_id = contract.create_task("ETH price", "1906.94", 100)
     contract.submit_answer(task_id, "1906.94", "agent-a")
     verdict = contract.evaluate(task_id, "ETH/USDC")
-
     assert '"accepted": true' in verdict
     assert contract.get_reputation("agent-a") == 1
 
 
 def test_scenario_wrong_answer_does_not_credit_reputation():
-    AgentJudge = load_contract()
-    contract = AgentJudge("https://agent-judge-relayer-production.up.railway.app")
-
+    contract = make_contract()
     task_id = contract.create_task("ETH price", "1906.94", 100)
     contract.submit_answer(task_id, "2500", "agent-b")
     verdict = contract.evaluate(task_id, "ETH/USDC")
-
     assert '"accepted": false' in verdict
     assert contract.get_reputation("agent-b") == 0
 
 
 def test_scenario_dispute_requires_creator_and_is_one_shot():
-    AgentJudge = load_contract()
-    contract = AgentJudge("https://agent-judge-relayer-production.up.railway.app")
+    contract = make_contract()
     task_id = contract.create_task("ETH price", "1906.94", 100)
     contract.submit_answer(task_id, "1906.94", "agent-c")
     contract.evaluate(task_id, "ETH/USDC")
 
     _FakeRuntime.message.sender_address = _Address("attacker")
-    try:
+    with pytest.raises(_FakeRuntime.vm.UserError, match="only the task creator can dispute"):
         contract.dispute(task_id, "ETH/USDC")
-        assert False, "unauthorized dispute must fail"
-    except _FakeRuntime.vm.UserError as exc:
-        assert str(exc) == "only the task creator can dispute"
 
     _FakeRuntime.message.sender_address = _Address("creator")
     contract.dispute(task_id, "ETH/USDC")
-    try:
+    with pytest.raises(_FakeRuntime.vm.UserError, match="task has already been disputed"):
         contract.dispute(task_id, "ETH/USDC")
-        assert False, "duplicate dispute must fail"
-    except _FakeRuntime.vm.UserError as exc:
-        assert str(exc) == "task has already been disputed"
 
 
 def test_scenario_verdict_reversal_removes_prior_reputation_credit():
-    AgentJudge = load_contract()
-    contract = AgentJudge("https://agent-judge-relayer-production.up.railway.app")
-
+    contract = make_contract()
     task_id = contract.create_task("ETH price", "1906.94", 100)
     contract.submit_answer(task_id, "1906.94", "agent-d")
     contract.evaluate(task_id, "ETH/USDC")
@@ -171,25 +173,21 @@ def test_scenario_verdict_reversal_removes_prior_reputation_credit():
         '"age_ms":1000,"fresh":true}'
     )
     contract.dispute(task_id, "ETH/USDC")
-
     assert contract.get_reputation("agent-d") == 0
     assert '"accepted": false' in contract.get_task(task_id)
 
 
 def test_scenario_live_source_failure_is_rejected():
-    AgentJudge = load_contract()
-    contract = AgentJudge("https://agent-judge-relayer-production.up.railway.app")
+    contract = make_contract()
     task_id = contract.create_task("ETH price", "1906.94", 100)
     contract.submit_answer(task_id, "1906.94", "agent-e")
     _FakeRuntime._Web.response = _Response('{"error":"live quote request failed"}')
-
     with pytest.raises(_FakeRuntime.vm.UserError, match="missing required fields"):
         contract.evaluate(task_id, "ETH/USDC")
 
 
 def test_scenario_requested_pair_must_match_returned_pair():
-    AgentJudge = load_contract()
-    contract = AgentJudge("https://agent-judge-relayer-production.up.railway.app")
+    contract = make_contract()
     task_id = contract.create_task("BTC price", "60000", 100)
     contract.submit_answer(task_id, "60000", "agent-f")
     _FakeRuntime._Web.response = _Response(
@@ -197,14 +195,12 @@ def test_scenario_requested_pair_must_match_returned_pair():
         '"source":"binance-spot","timestamp_ms":1723900000000,'
         '"age_ms":1000,"fresh":true}'
     )
-
     with pytest.raises(_FakeRuntime.vm.UserError, match="different trading pair"):
         contract.evaluate(task_id, "BTC/USDC")
 
 
 def test_scenario_stale_quote_is_rejected():
-    AgentJudge = load_contract()
-    contract = AgentJudge("https://agent-judge-relayer-production.up.railway.app")
+    contract = make_contract()
     task_id = contract.create_task("ETH price", "1906.94", 100)
     contract.submit_answer(task_id, "1906.94", "agent-g")
     _FakeRuntime._Web.response = _Response(
@@ -212,33 +208,26 @@ def test_scenario_stale_quote_is_rejected():
         '"source":"binance-spot","timestamp_ms":1723900000000,'
         '"age_ms":60001,"fresh":false}'
     )
-
     with pytest.raises(_FakeRuntime.vm.UserError, match="stale quote"):
         contract.evaluate(task_id, "ETH/USDC")
 
 
 def test_scenario_malformed_response_is_rejected():
-    AgentJudge = load_contract()
-    contract = AgentJudge("https://agent-judge-relayer-production.up.railway.app")
+    contract = make_contract()
     task_id = contract.create_task("ETH price", "1906.94", 100)
     contract.submit_answer(task_id, "1906.94", "agent-h")
-
     _FakeRuntime._Web.response = _Response('{"pair":"ETH/USDC", "price_x1e6": ')
-
     with pytest.raises(_FakeRuntime.vm.UserError, match="malformed JSON"):
         contract.evaluate(task_id, "ETH/USDC")
 
 
 def test_scenario_malformed_missing_fields_is_rejected():
-    AgentJudge = load_contract()
-    contract = AgentJudge("https://agent-judge-relayer-production.up.railway.app")
+    contract = make_contract()
     task_id = contract.create_task("ETH price", "1906.94", 100)
     contract.submit_answer(task_id, "1906.94", "agent-i")
-
     _FakeRuntime._Web.response = _Response(
         '{"pair":"ETH/USDC","source":"binance-spot",'
         '"fresh":true,"age_ms":100}'
     )
-
     with pytest.raises(_FakeRuntime.vm.UserError, match="missing required fields"):
         contract.evaluate(task_id, "ETH/USDC")
