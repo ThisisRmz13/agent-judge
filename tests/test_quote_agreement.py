@@ -55,7 +55,7 @@ def _run_with_two_quotes(first_price, second_price):
 def test_validator_agreement_accepts_legitimate_quote_movement():
     verdict, principle = _run_with_two_quotes(1906940000, 1910000000)
     assert '"accepted": true' in verdict
-    assert "50 basis points" in principle
+    assert "50 bps" in principle
     assert "pair" in principle
     assert "source" in principle
     assert "timestamp_ms" in principle
