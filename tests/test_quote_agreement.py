@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from test_contract_behavior import _FakeRuntime, _Response, load_contract
+from test_contract_behavior import _FakeRuntime, _Response, _DEFAULT_RESPONSE, load_contract
 
 
 def _quote(price):
@@ -14,6 +14,15 @@ def _quote(price):
         "age_ms": 1000,
         "fresh": True,
     }))
+
+
+@pytest.fixture(autouse=True)
+def reset_runtime():
+    _FakeRuntime._Web.response = _Response(_DEFAULT_RESPONSE)
+    _FakeRuntime.message.sender_address = _FakeRuntime.Address("creator")
+    _FakeRuntime.eq_principle.prompt_comparative = staticmethod(
+        lambda fn, principle="": fn()
+    )
 
 
 def _run_with_two_quotes(first_price, second_price):
