@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from test_contract_behavior import _FakeRuntime, _Response, _DEFAULT_RESPONSE, load_contract
+from test_contract_behavior import _FakeRuntime, _Response, _DEFAULT_RESPONSE, make_contract
 
 
 def _quote(price):
@@ -26,8 +26,7 @@ def reset_runtime():
 
 
 def _run_with_two_quotes(first_price, second_price):
-    AgentJudge = load_contract()
-    contract = AgentJudge("https://agent-judge-relayer-production.up.railway.app")
+    contract = make_contract()
     task_id = contract.create_task("ETH price", "1906.94", 100)
     contract.submit_answer(task_id, "1906.94", "agent-movement")
 
