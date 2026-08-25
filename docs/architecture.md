@@ -2,70 +2,83 @@
 
 ## What the MVP proves
 
-Agent Judge is a GenLayer Intelligent Contract that evaluates an agent's submitted numeric answer against a freshly fetched market quote. The contract owns task state, verdicts, reputation, and dispute history. External market data is the only non-deterministic input.
+Agent Judge is a GenLayer Intelligent Contract that evaluates an agent's submitted numeric answer against a freshly fetched market quote. The contract owns task state, verdicts, reputation, and dispute history. External market data is the non-deterministic input.
 
-The intended trust boundary is simple:
+The current trust boundary is:
 
-`Agent -> Intelligent Contract -> Equivalence Principle -> relayer -> market API`
+`Agent -> Intelligent Contract -> Equivalence Principle -> Cloudflare Worker -> CoinCap API`
 
-The relayer is a transport adapter. It does not decide whether an answer passes, does not write contract state, and does not award reputation.
+The relayer is a transport and validation adapter. It does not decide whether an answer passes, does not write contract state, and does not award reputation.
 
 ## Consensus design
 
-Each validator independently executes the external quote request inside a comparative Equivalence Principle boundary (`gl.eq_principle.prompt_comparative`). The returned payload is reduced to stable normalized fields: trading pair, integer price in 1e-6 units, source identifier, and quote timing metadata.
+Each validator independently executes the external quote request inside `gl.eq_principle.prompt_comparative`. The contract validates the returned payload before it participates in the comparison.
 
-Strict byte-for-byte equality is not used for this step, because each validator fetches the live quote independently and at a slightly different moment. Two honest validators will legitimately observe slightly different prices and timestamps due to normal market movement between fetches; requiring an exact match would make consensus fail even when every validator is behaving correctly.
+The normalized quote contains the trading pair, integer price in 1e-6 units, source identifier, reference value, and quote timing metadata.
 
-Instead, the comparison principle requires:
+Strict byte-for-byte equality is not used because independent validators fetch live data at slightly different moments. The comparison principle requires the pair, source, and reference to match exactly. Price values may differ by up to 50 bps. Timestamp and age metadata may differ as long as each validator independently satisfies the freshness and timestamp checks.
 
-- The `pair` and `source` fields to match exactly.
-- The `price_x1e6` values to agree within 50 basis points (0.5 percent) of one another, which is treated as legitimate quote movement rather than disagreement.
-- `timestamp_ms` and `age_ms` to be allowed to differ between validators, as long as each individually satisfies the freshness window enforced before this comparison step.
+After consensus returns, the contract deterministically compares the submitted answer with the agreed live price using the task's `tolerance_bps`.
 
-The contract then performs the tolerance comparison against the agent's submitted answer deterministically after consensus returns. A submission passes when its value is within `tolerance_bps` of the agreed live quote.
+## CoinCap adapter
 
-This follows the GenLayer requirement that `gl.nondet.web.*` calls live inside an Equivalence Principle function, while deterministic state changes occur outside that non-deterministic block.
+The current live provider is CoinCap. The Cloudflare Worker reads `COINCAP_API_KEY` from a secret binding and calls the CoinCap price-by-symbol endpoint.
 
-## Why the relayer exists
+For a requested pair such as `ETHUSDC`, the adapter extracts the base asset (`ETH`) and obtains the CoinCap asset price. The response keeps the requested pair as the contract-facing identifier and labels the source `coincap`.
 
-The relayer keeps provider credentials off-chain and out of public client code. It forwards a quote request and normalizes the provider response. It cannot change the verdict because verdict calculation and reputation updates are performed by the Intelligent Contract after consensus.
+This is an MVP normalization boundary. It should not be described as a direct CoinCap ETH/USDC order-book quote because CoinCap's asset price is USD-denominated. A future multi-source adapter can provide true quote-pair prices when required.
 
-The relayer is therefore an operational trust boundary, not a decision-making authority.
+The Node relayer in `relayer/server.js` mirrors this behavior for local development and tests. It is deliberately dependency-injected so tests can use a local fake upstream without a real CoinCap credential.
 
-## Tolerance choice
+## Freshness and integrity checks
 
-The MVP exposes tolerance as a task parameter in basis points. The reference implementation uses 50 bps in the demo, but this value is a configurable assumption, not a claim that 0.5% is universally safe.
+The contract rejects:
 
-A production configuration should benchmark repeated quotes during realistic volatility and choose a tolerance from observed provider variance, expected market movement, and the acceptable false-reject rate. A live benchmark requires provider credentials and is intentionally not faked by this repository.
+- missing required quote fields
+- returned pair mismatches
+- source mismatches
+- reference mismatches
+- `fresh: false`
+- negative or excessive quote age
+- non-positive or future timestamps
+- non-positive prices
+
+The relayer also rejects stale upstream data before returning a quote.
+
+## Reputation and disputes
+
+`get_reputation` stores a per-agent successful evaluation count on-chain. A completed task can be disputed only by its creator and only once. A dispute triggers a fresh evaluation. If the new verdict reverses an earlier accepted result, the previous reputation credit is reconciled.
+
+The MVP has no dispute staking, rate limiting, or bounded dispute window. These remain production hardening items.
 
 ## Known limitations and future hardening
 
 ### Single data source risk
 
-The current MVP can operate against one authoritative source through the relayer. If that provider is unavailable or stale, evaluation can fail. This is accepted as an MVP limitation.
+CoinCap is currently the single external provider. If it is unavailable or returns data outside the freshness window, evaluation can fail.
 
-### Path to hardening
+### Pair semantics
 
-A production version should query at least one additional source, such as another exchange aggregator, inside the same non-deterministic evaluation flow and require cross-source agreement before accepting a quote. This reduces dependence on one provider and gives the judge a stronger basis for resolving stale or anomalous data.
+The MVP accepts market identifiers such as `ETHUSDC`, but the current CoinCap adapter obtains the base asset's USD price. This is suitable for the current demo but should be replaced with a true quote-pair source before presenting the system as an exact USDC oracle.
 
-### Reputation usage
+### Multi-source validation
 
-`get_reputation` stores a per-agent successful evaluation count on-chain. The MVP does not use reputation to alter a verdict. The intended continued-use path is a public reputation layer that marketplaces can query, with an optional future policy that uses reputation only to break ties or prioritize agents in task routing.
+A production version should query at least one additional independent source inside the same non-deterministic evaluation flow and require cross-source agreement.
 
-### Dispute mechanism
+### Frontend
 
-`dispute()` is intentionally minimal. A completed task can be disputed and triggers a fresh evaluation against newly fetched live data. The new verdict replaces the previous stored verdict when the re-evaluation runs. The current MVP has no staking or rate limiting, so production deployments should add anti-spam controls and a bounded dispute window.
+The repository includes a small browser UI that can call the relayer health and quote endpoints. It is an operational demo surface, not a replacement for GenLayer Studio.
 
 ## Workflow
 
-1. A user creates a task with a reference value and tolerance.
+1. A user creates a task with a prompt, reference value, tolerance, and pair.
 2. An agent submits an answer.
-3. Validators independently obtain the external quote inside a comparative Equivalence Principle boundary that tolerates legitimate price movement between fetches.
-4. Consensus returns one normalized quote.
+3. Validators independently obtain the external quote inside the comparative Equivalence Principle boundary.
+4. Consensus returns a normalized quote.
 5. The contract compares the answer with the agreed quote.
-6. A passing answer increments the agent's reputation counter.
-7. A completed task can be disputed and re-evaluated with fresh data.
+6. A passing answer increments the agent's reputation.
+7. The task creator may dispute once, causing a fresh evaluation.
 
 ## Submission boundary
 
-The repository intentionally includes a mock relayer mode so the complete workflow can be demonstrated without an API key. This is a test/demo mode and must not be described as live market data.
+The repository contains deterministic local relayer tests. The live Cloudflare Worker requires the `COINCAP_API_KEY` secret and should be the relayer URL used by the deployed contract.
