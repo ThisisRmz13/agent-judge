@@ -1,11 +1,23 @@
 const MODE = 'live';
-const BINANCE_API_URL = 'https://data-api.binance.vision/api/v3/ticker/24hr';
+const COINBASE_TICKER_URL = 'https://api.exchange.coinbase.com/products';
 const MAX_QUOTE_AGE_MS = 60000;
 
 function normalizePair(pair) {
   const raw = String(pair || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
   if (!raw) throw new Error('pair is required');
   return raw;
+}
+
+function toCoinbaseProductId(symbol) {
+  if (symbol.length < 4) throw new Error('invalid trading pair');
+  for (let i = 2; i <= symbol.length - 2; i++) {
+    const base = symbol.slice(0, i);
+    const quote = symbol.slice(i);
+    if (['USD', 'USDC', 'USDT', 'EUR', 'GBP', 'BTC', 'ETH'].includes(quote)) {
+      return `${base}-${quote}`;
+    }
+  }
+  throw new Error('unsupported trading pair');
 }
 
 function json(body, status = 200) {
@@ -22,8 +34,10 @@ async function handleQuote(request) {
 
   try {
     const requestedSymbol = normalizePair(pair);
+    const productId = toCoinbaseProductId(requestedSymbol);
     const response = await fetch(
-      `${BINANCE_API_URL}?symbol=${encodeURIComponent(requestedSymbol)}`
+      `${COINBASE_TICKER_URL}/${encodeURIComponent(productId)}/ticker`,
+      { headers: { 'accept': 'application/json' } }
     );
 
     if (!response.ok) {
@@ -41,17 +55,17 @@ async function handleQuote(request) {
       return json({ error: 'upstream returned a malformed response' }, 502);
     }
 
-    const returnedSymbol = normalizePair(data.symbol);
-    if (returnedSymbol !== requestedSymbol) {
+    const returnedProduct = normalizePair(productId.replace('-', ''));
+    if (returnedProduct !== requestedSymbol) {
       return json({
         error: 'upstream returned a different trading pair',
         requested_pair: requestedSymbol,
-        returned_pair: returnedSymbol
+        returned_pair: returnedProduct
       }, 502);
     }
 
-    const price = Number(data.lastPrice);
-    const timestampMs = Number(data.closeTime);
+    const price = Number(data.price);
+    const timestampMs = Date.parse(data.time);
     const now = Date.now();
 
     if (!Number.isFinite(price) || price <= 0) {
@@ -71,13 +85,13 @@ async function handleQuote(request) {
     }
 
     return json({
-      pair: data.symbol,
+      pair: requestedSymbol,
       reference,
       price_x1e6: Math.round(price * 1e6),
       timestamp_ms: timestampMs,
       age_ms: ageMs,
       fresh: true,
-      source: 'binance-spot'
+      source: 'coinbase-spot'
     });
   } catch (error) {
     return json({
