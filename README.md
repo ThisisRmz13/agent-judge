@@ -1,14 +1,24 @@
 # Agent Judge
 
-A GenLayer Intelligent Contract that evaluates agent answers against an external market quote while keeping the final verdict and reputation logic on-chain.
+A GenLayer Intelligent Contract that evaluates an agent's numeric answer against a fresh external market quote while keeping the verdict, reputation, and dispute logic on-chain.
 
-## Live relayer
+## Live data path
 
-The Railway relayer is deployed at:
+The current live path is:
 
-`https://agent-judge-relayer-production.up.railway.app`
+```text
+GenLayer AgentJudge
+        |
+        v
+Cloudflare Worker relayer
+        |
+        v
+CoinCap API
+```
 
-Deploy the contract with that URL as the `relayer_url` constructor argument.
+The deployed Worker is configured with the `COINCAP_API_KEY` secret. The contract accepts only quote responses whose `source` is `coincap`.
+
+For local development, `relayer/server.js` implements the same CoinCap response contract with an injectable API base and API key, so the relayer tests do not require a real credential.
 
 ## Quality-bar mapping
 
@@ -18,31 +28,29 @@ Agent outputs can be wrong or stale. The judge obtains an external market refere
 
 **2. Intelligent Contract**
 
-The core evaluation path is implemented as a Python GenLayer Intelligent Contract using `gl.eq_principle.prompt_comparative` around the external quote fetch, with a tolerance of 50 basis points on price so that legitimate market movement between independent validator fetches does not break consensus.
+The core evaluation path is implemented as a Python GenLayer Intelligent Contract using `gl.eq_principle.prompt_comparative` around the external quote fetch. Validator quote movement is tolerated up to 50 bps, while the agent's own answer is compared deterministically against the agreed quote using the task's `tolerance_bps`.
 
-**3. Live or authoritative data path**
+**3. Live authoritative data boundary**
 
-The relayer provides the external quote boundary. Mock mode remains available for local development, while the deployed Railway service is configured for live mode.
+CoinCap is the current external quote provider. The relayer validates the upstream response, converts the price to integer `price_x1e6`, enforces a 60 second freshness window, and returns a normalized JSON payload.
 
 **4. Consensus-aware design**
 
-Only normalized, structured quote data participates in the comparative equivalence check: the trading pair and source must match exactly, while the price is allowed to differ by up to 50 basis points and timing metadata is allowed to differ between validators as long as each independently satisfies the freshness window. The tolerance comparison against the agent's submitted answer is deterministic and happens after consensus.
+The comparative equivalence principle requires the pair, source, and reference to match. Independent validator prices may move within 50 bps, and timestamp/age metadata may differ as long as each quote passes freshness and timestamp validation.
 
-**5. Working app path**
+**5. Contract lifecycle**
 
-`frontend/index.html` provides the interaction surface. The contract API is explicit and ready to connect to GenLayerJS. The relayer exposes `/health` and `/quote` for the external-data boundary.
+The contract supports:
+
+```text
+create_task -> submit_answer -> evaluate -> optional dispute -> re-evaluate
+```
+
+A successful evaluation increments the submitted agent's reputation. If a dispute changes an accepted verdict to rejected, the previous reputation credit is removed.
 
 **6. Risk disclosure**
 
-Known limitations, provider dependence, relayer trust boundary, tolerance assumptions, reputation scope, and disputes are documented in `docs/architecture.md`.
-
-**7. Demonstrable testing**
-
-Static and behavioral contract checks are included, covering pair mismatches, stale quotes, malformed relayer responses, live-source failures, dispute authorization, and reputation reconciliation. The relayer suite additionally tests upstream HTTP failures, malformed upstream JSON, returned-symbol mismatch, stale quotes, and valid fresh quotes. The validator agreement suite tests both legitimate and excessive quote movement.
-
-**8. Continued-use path**
-
-Reputation is persisted on-chain and exposed through `get_reputation`, while the architecture defines a path toward marketplace ranking and multi-source quote validation.
+The MVP still has a single-provider trust boundary, no dispute staking, and no dispute rate limiting. These are documented in `docs/architecture.md`.
 
 ## Repository
 
@@ -50,7 +58,9 @@ Reputation is persisted on-chain and exposed through `get_reputation`, while the
 contracts/agent_judge.py
 relayer/server.js
 relayer/server.test.js
+relayer/worker.js
 frontend/index.html
+frontend/src/main.js
 tests/test_contract_static.py
 tests/test_contract_behavior.py
 tests/test_quote_agreement.py
@@ -66,33 +76,48 @@ npm test
 npm start
 ```
 
-The local default mode is mock. The Railway deployment is configured separately for the live adapter.
+Set `COINCAP_API_KEY` before starting the live relayer. The tests inject a fake key and a local upstream server, so they do not contact CoinCap.
 
 ## GenLayer Studio
 
-Load `contracts/agent_judge.py` into Studio and deploy it with:
+Deploy the current `contracts/agent_judge.py` with the deployed Cloudflare Worker URL as the constructor argument.
+
+The current public contract instance is:
 
 ```text
-AgentJudge("https://agent-judge-relayer-production.up.railway.app")
+0x0F4c2b69BC64784Ef26A15ddAFceb733c4276949
 ```
 
-Then exercise:
+Then use:
 
 ```text
-create_task(prompt, reference_value, tolerance_bps)
+create_task(prompt, reference_value, tolerance_bps, pair)
 submit_answer(task_id, answer_value, agent_label)
-evaluate(task_id, pair)
-dispute(task_id, pair)
+evaluate(task_id)
+dispute(task_id)
 get_task(task_id)
 get_reputation(agent_label)
 ```
 
-Do not claim a successful live verdict until the Studio integration flow has actually been executed against the deployed relayer.
+Example task:
+
+```text
+prompt: ETH price
+reference_value: 2478
+ tolerance_bps: 100
+pair: ETHUSDC
+```
+
+The current CoinCap adapter uses the base asset from pairs such as `ETHUSDC` and returns the CoinCap USD price under the requested pair label. The project should therefore treat `ETHUSDC` as the current MVP market identifier, not as proof of a direct CoinCap ETH/USDC order-book quote.
+
+Do not claim a successful live verdict until the Studio evaluation transaction itself reaches `FINALIZED` without a rollback.
 
 ## Testing
 
 ```bash
 python -m pytest tests -q
+cd relayer
+npm test
 ```
 
-For full GenLayer validation, also run the current GenLayer linter and Studio-mode integration tests in an installed GenLayer environment.
+For final GenLayer validation, also run the current GenLayer linter and Studio-mode integration flow.
