@@ -16,7 +16,7 @@ class _Address(str):
 class _Response:
     def __init__(self, body): self.body = body.encode("utf-8")
 
-_DEFAULT_RESPONSE = '{"pair":"ETH/USDC","price_x1e6":1906940000,"source":"binance-spot","timestamp_ms":1723900000000,"age_ms":1000,"fresh":true,"reference":"1906.94"}'
+_DEFAULT_RESPONSE = '{"pair":"ETH/USDC","price_x1e6":1906940000,"source":"coincap","timestamp_ms":1723900000000,"age_ms":1000,"fresh":true,"reference":"1906.94"}'
 
 class _FakeRuntime:
     class Contract: pass
@@ -68,7 +68,7 @@ def load_contract():
     return module.AgentJudge
 
 def make_contract():
-    contract = load_contract()("https://agent-judge-relayer-production.up.railway.app")
+    contract = load_contract()("https://0d316208-agent-judge.mr-aliramezani2.workers.dev")
     for name in ("task_data", "task_status", "task_creator", "task_agent", "task_answer", "task_verdict", "reputation", "reputation_credited", "dispute_count"):
         setattr(contract, name, _TreeMap())
     return contract
@@ -102,7 +102,7 @@ def test_scenario_dispute_requires_creator_and_is_one_shot():
 
 def test_scenario_verdict_reversal_removes_prior_reputation_credit():
     c = make_contract(); tid = create_eth_task(c); c.submit_answer(tid, "1906.94", "agent-d"); c.evaluate(tid)
-    _FakeRuntime._Web.response = _Response('{"pair":"ETH/USDC","price_x1e6":2200000000,"source":"binance-spot","timestamp_ms":1723900000000,"age_ms":1000,"fresh":true,"reference":"1906.94"}')
+    _FakeRuntime._Web.response = _Response('{"pair":"ETH/USDC","price_x1e6":2200000000,"source":"coincap","timestamp_ms":1723900000000,"age_ms":1000,"fresh":true,"reference":"1906.94"}')
     c.dispute(tid); assert c.get_reputation("agent-d") == 0; assert '"accepted": false' in c.get_task(tid)
 
 def test_scenario_live_source_failure_is_rejected():
@@ -124,28 +124,28 @@ def test_scenario_source_mismatch_is_rejected():
 
 def test_scenario_stale_quote_is_rejected():
     c = make_contract(); tid = create_eth_task(c); c.submit_answer(tid, "1906.94", "agent-g")
-    _FakeRuntime._Web.response = _Response('{"pair":"ETH/USDC","price_x1e6":1906940000,"source":"binance-spot","timestamp_ms":1723900000000,"age_ms":60001,"fresh":false,"reference":"1906.94"}')
+    _FakeRuntime._Web.response = _Response('{"pair":"ETH/USDC","price_x1e6":1906940000,"source":"coincap","timestamp_ms":1723900000000,"age_ms":60001,"fresh":false,"reference":"1906.94"}')
     with pytest.raises(_FakeRuntime.vm.UserError, match="stale quote"): c.evaluate(tid)
 
 def test_scenario_fresh_true_but_stale_age_is_rejected():
     c = make_contract(); tid = create_eth_task(c); c.submit_answer(tid, "1906.94", "agent-fresh")
-    _FakeRuntime._Web.response = _Response('{"pair":"ETH/USDC","price_x1e6":1906940000,"source":"binance-spot","timestamp_ms":1723900000000,"age_ms":60001,"fresh":true,"reference":"1906.94"}')
+    _FakeRuntime._Web.response = _Response('{"pair":"ETH/USDC","price_x1e6":1906940000,"source":"coincap","timestamp_ms":1723900000000,"age_ms":60001,"fresh":true,"reference":"1906.94"}')
     with pytest.raises(_FakeRuntime.vm.UserError, match="stale quote"): c.evaluate(tid)
 
 def test_scenario_future_timestamp_is_rejected():
     c = make_contract(); tid = create_eth_task(c); c.submit_answer(tid, "1906.94", "agent-future")
     future_ms = int(datetime.now(timezone.utc).timestamp() * 1000) + 60000
-    _FakeRuntime._Web.response = _Response('{"pair":"ETH/USDC","price_x1e6":1906940000,"source":"binance-spot","timestamp_ms":%d,"age_ms":0,"fresh":true,"reference":"1906.94"}' % future_ms)
+    _FakeRuntime._Web.response = _Response('{"pair":"ETH/USDC","price_x1e6":1906940000,"source":"coincap","timestamp_ms":%d,"age_ms":0,"fresh":true,"reference":"1906.94"}' % future_ms)
     with pytest.raises(_FakeRuntime.vm.UserError, match="invalid quote timestamp"): c.evaluate(tid)
 
 def test_scenario_reference_mismatch_is_rejected():
     c = make_contract(); tid = create_eth_task(c); c.submit_answer(tid, "1906.94", "agent-ref")
-    _FakeRuntime._Web.response = _Response('{"pair":"ETH/USDC","price_x1e6":1906940000,"source":"binance-spot","timestamp_ms":1723900000000,"age_ms":1000,"fresh":true,"reference":"9999"}')
+    _FakeRuntime._Web.response = _Response('{"pair":"ETH/USDC","price_x1e6":1906940000,"source":"coincap","timestamp_ms":1723900000000,"age_ms":1000,"fresh":true,"reference":"9999"}')
     with pytest.raises(_FakeRuntime.vm.UserError, match="different reference"): c.evaluate(tid)
 
 def test_scenario_reference_and_pair_are_url_encoded():
     c = make_contract()
-    _FakeRuntime._Web.response = _Response('{"pair":"ETH/USDC & TEST","price_x1e6":1906940000,"source":"binance-spot","timestamp_ms":1723900000000,"age_ms":1000,"fresh":true,"reference":"1906.94+foo&bar"}')
+    _FakeRuntime._Web.response = _Response('{"pair":"ETH/USDC & TEST","price_x1e6":1906940000,"source":"coincap","timestamp_ms":1723900000000,"age_ms":1000,"fresh":true,"reference":"1906.94+foo&bar"}')
     c._quote_snapshot("ETH/USDC & test", "1906.94+foo&bar")
     assert "pair=ETH%2FUSDC%20%26%20test" in _FakeRuntime._Web.captured_url
     assert "reference=1906.94%2Bfoo%26bar" in _FakeRuntime._Web.captured_url
@@ -155,5 +155,5 @@ def test_scenario_malformed_response_is_rejected():
     with pytest.raises(_FakeRuntime.vm.UserError, match="malformed JSON"): c.evaluate(tid)
 
 def test_scenario_malformed_missing_fields_is_rejected():
-    c = make_contract(); tid = create_eth_task(c); c.submit_answer(tid, "1906.94", "agent-i"); _FakeRuntime._Web.response = _Response('{"pair":"ETH/USDC","source":"binance-spot","fresh":true,"age_ms":100,"reference":"1906.94"}')
+    c = make_contract(); tid = create_eth_task(c); c.submit_answer(tid, "1906.94", "agent-i"); _FakeRuntime._Web.response = _Response('{"pair":"ETH/USDC","source":"coincap","fresh":true,"age_ms":100,"reference":"1906.94"}')
     with pytest.raises(_FakeRuntime.vm.UserError, match="missing required fields"): c.evaluate(tid)
