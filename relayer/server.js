@@ -1,9 +1,7 @@
 const express = require('express');
 
 const PORT = Number(process.env.PORT || 8787);
-const MODE = process.env.QUOTE_MODE || 'mock';
-const BINANCE_API_URL = process.env.BINANCE_API_URL || 'https://api.binance.com/api/v3/ticker/24hr';
-const MOCK_PRICE_X1E6 = Number(process.env.MOCK_PRICE_X1E6 || 3200000000);
+const COINCAP_API_BASE = process.env.COINCAP_API_BASE || 'https://rest.coincap.io/v3/price/bysymbol';
 const MAX_QUOTE_AGE_MS = Number(process.env.MAX_QUOTE_AGE_MS || 60000);
 
 function json(res, status, body) {
@@ -16,40 +14,51 @@ function normalizePair(pair) {
   return raw;
 }
 
+function baseAsset(pair) {
+  const normalized = normalizePair(pair);
+  for (const quote of ['USDC', 'USDT', 'USD']) {
+    if (normalized.endsWith(quote) && normalized.length > quote.length) {
+      return normalized.slice(0, -quote.length);
+    }
+  }
+  throw new Error('unsupported trading pair');
+}
+
 function createApp({
-  mode = MODE,
-  binanceApiUrl = BINANCE_API_URL,
-  mockPriceX1e6 = MOCK_PRICE_X1E6,
+  coinCapApiBase = COINCAP_API_BASE,
   maxQuoteAgeMs = MAX_QUOTE_AGE_MS,
+  apiKey = process.env.COINCAP_API_KEY,
   fetchImpl = fetch,
   now = () => Date.now()
 } = {}) {
   const app = express();
   app.use(express.json());
 
-  app.get('/health', (_req, res) => json(res, 200, { ok: true, mode }));
+  app.get('/health', (_req, res) => json(res, 200, { ok: true, mode: 'live', source: 'coincap' }));
 
   app.get('/quote', async (req, res) => {
-    const pair = String(req.query.pair || 'ETH/USDC');
+    const pair = String(req.query.pair || 'ETHUSDC');
     const reference = String(req.query.reference || '0');
 
-    if (mode === 'mock') {
-      return json(res, 200, {
-        pair,
-        reference,
-        price_x1e6: mockPriceX1e6,
-        timestamp_ms: now(),
-        age_ms: 0,
-        fresh: true,
-        source: 'mock'
-      });
+    if (!apiKey) {
+      return json(res, 500, { error: 'COINCAP_API_KEY secret is not configured' });
+    }
+
+    let requestedSymbol;
+    let asset;
+    try {
+      requestedSymbol = normalizePair(pair);
+      asset = baseAsset(requestedSymbol);
+    } catch (error) {
+      return json(res, 400, { error: String(error.message || error) });
     }
 
     try {
-      const requestedSymbol = normalizePair(pair);
       const response = await fetchImpl(
-        `${binanceApiUrl}?symbol=${encodeURIComponent(requestedSymbol)}`
+        `${coinCapApiBase}/${encodeURIComponent(asset)}`,
+        { headers: { accept: 'application/json', Authorization: `Bearer ${apiKey}` } }
       );
+
       if (!response.ok) {
         return json(res, 502, {
           error: 'upstream quote provider returned an error',
@@ -57,28 +66,20 @@ function createApp({
         });
       }
 
-      let data;
+      let payload;
       try {
-        data = await response.json();
+        payload = await response.json();
       } catch (_error) {
         return json(res, 502, { error: 'upstream returned malformed JSON' });
       }
 
-      if (!data || typeof data !== 'object') {
+      const data = payload?.data;
+      if (!Array.isArray(data) || data.length === 0) {
         return json(res, 502, { error: 'upstream returned a malformed response' });
       }
 
-      const returnedSymbol = normalizePair(data.symbol);
-      if (returnedSymbol !== requestedSymbol) {
-        return json(res, 502, {
-          error: 'upstream returned a different trading pair',
-          requested_pair: requestedSymbol,
-          returned_pair: returnedSymbol
-        });
-      }
-
-      const price = Number(data.lastPrice);
-      const timestampMs = Number(data.closeTime);
+      const price = Number(data[0]);
+      const timestampMs = Number(payload.timestamp);
       if (!Number.isFinite(price) || price <= 0) {
         return json(res, 502, { error: 'upstream returned an invalid price' });
       }
@@ -96,13 +97,13 @@ function createApp({
       }
 
       return json(res, 200, {
-        pair: data.symbol,
+        pair: requestedSymbol,
         reference,
         price_x1e6: Math.round(price * 1e6),
         timestamp_ms: timestampMs,
         age_ms: ageMs,
         fresh: true,
-        source: 'binance-spot'
+        source: 'coincap'
       });
     } catch (error) {
       return json(res, 502, {
@@ -117,8 +118,8 @@ function createApp({
 
 if (require.main === module) {
   createApp().listen(PORT, '0.0.0.0', () =>
-    console.log(`Agent Judge relayer listening on :${PORT} (${MODE})`)
+    console.log(`Agent Judge CoinCap relayer listening on :${PORT}`)
   );
 }
 
-module.exports = { createApp, normalizePair };
+module.exports = { createApp, normalizePair, baseAsset };
