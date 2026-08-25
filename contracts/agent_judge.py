@@ -97,7 +97,7 @@ class AgentJudge(gl.Contract):
         if age_ms < 0 or age_ms > self.MAX_QUOTE_AGE_MS:
             raise gl.vm.UserError("relayer returned a stale quote")
         now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
-        if timestamp_ms <= 0 or timestamp_ms > now_ms:
+        if timestamp_ms <= 0 or timestamp_ms > now_ms + 5_000:
             raise gl.vm.UserError("relayer returned an invalid quote timestamp")
         if price_x1e6 <= 0:
             raise gl.vm.UserError("relayer returned an invalid price")
