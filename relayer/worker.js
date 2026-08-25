@@ -1,5 +1,5 @@
 const MODE = 'live';
-const COINCAP_URL = 'https://api.coincap.io/v2/assets/ethereum';
+const COINCAP_URL = 'https://rest.coincap.io/v3/price/bysymbol/ETH';
 const MAX_QUOTE_AGE_MS = 60000;
 
 function normalizePair(pair) {
@@ -15,7 +15,7 @@ function json(body, status = 200) {
   });
 }
 
-async function handleQuote(request) {
+async function handleQuote(request, env) {
   const url = new URL(request.url);
   const pair = url.searchParams.get('pair') || 'ETH/USDC';
   const reference = url.searchParams.get('reference') || '0';
@@ -26,8 +26,15 @@ async function handleQuote(request) {
       return json({ error: 'unsupported trading pair', requested_pair: requestedSymbol, supported_pair: 'ETHUSDC' }, 400);
     }
 
+    if (!env.COINCAP_API_KEY) {
+      return json({ error: 'COINCAP_API_KEY secret is not configured' }, 500);
+    }
+
     const response = await fetch(COINCAP_URL, {
-      headers: { accept: 'application/json' }
+      headers: {
+        accept: 'application/json',
+        Authorization: `Bearer ${env.COINCAP_API_KEY}`
+      }
     });
 
     if (!response.ok) {
@@ -42,15 +49,11 @@ async function handleQuote(request) {
     }
 
     const data = payload?.data;
-    if (!data || typeof data !== 'object') {
+    if (!Array.isArray(data) || data.length === 0) {
       return json({ error: 'upstream returned a malformed response' }, 502);
     }
 
-    if (String(data.symbol || '').toUpperCase() !== 'ETH') {
-      return json({ error: 'upstream returned a different asset' }, 502);
-    }
-
-    const price = Number(data.priceUsd);
+    const price = Number(data[0]);
     const timestampMs = Number(payload.timestamp);
     const now = Date.now();
 
@@ -81,10 +84,10 @@ async function handleQuote(request) {
 }
 
 export default {
-  async fetch(request) {
+  async fetch(request, env) {
     const url = new URL(request.url);
     if (url.pathname === '/health') return json({ ok: true, mode: MODE });
-    if (url.pathname === '/quote') return handleQuote(request);
+    if (url.pathname === '/quote') return handleQuote(request, env);
     return new Response('Not Found', { status: 404 });
   }
 };
