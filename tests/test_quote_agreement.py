@@ -9,7 +9,7 @@ def _quote(price):
     return _Response(json.dumps({
         "pair": "ETH/USDC",
         "price_x1e6": price,
-        "source": "binance-spot",
+        "source": "coincap",
         "timestamp_ms": 1723900000000,
         "age_ms": 1000,
         "fresh": True,
@@ -62,6 +62,7 @@ def test_validator_agreement_accepts_legitimate_quote_movement():
     assert "reference" in principle
     assert "Timestamp and age" in principle
     assert "freshness" in principle
+    assert "CoinCap" in principle
 
 
 def test_validator_agreement_rejects_excessive_quote_movement():
