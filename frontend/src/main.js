@@ -9,29 +9,29 @@ app.innerHTML = `
     <header><h1>Agent Judge</h1><p>On-chain task evaluation with GenLayer consensus.</p></header>
     <section class="card">
       <h2>Connection</h2>
-      <input id="contract" placeholder="Deployed contract address" />
+      <input id="contract" value="0x0F4c2b69BC64784Ef26A15ddAFceb733c4276949" placeholder="Deployed contract address" />
       <button id="connect">Connect wallet</button>
       <div id="account" class="muted">Disconnected</div>
     </section>
     <section class="grid">
       <div class="card">
         <h2>Create task</h2>
-        <input id="prompt" value="Return the current ETH/USDC price within tolerance." />
-        <input id="reference" value="3200" />
-        <input id="tolerance" value="50" type="number" />
+        <input id="prompt" value="ETH price" />
+        <input id="reference" value="2478" />
+        <input id="tolerance" value="100" type="number" min="1" max="1000" />
+        <input id="pair" value="ETHUSDC" />
         <button id="create">Create task</button>
       </div>
       <div class="card">
         <h2>Submit answer</h2>
-        <input id="task" placeholder="task id" />
+        <input id="task" value="task-0" placeholder="task id" />
         <input id="agent" value="demo-agent" />
-        <input id="answer" value="3200" />
-        <button id="submit">Submit</button>
+        <input id="answer" value="2478" />
+        <button id="submit">Submit answer</button>
       </div>
     </section>
     <section class="card">
       <h2>Evaluate and inspect</h2>
-      <input id="pair" value="ETH/USDC" />
       <button id="evaluate">Evaluate</button>
       <button id="read">Read task</button>
       <button id="reputation">Read reputation</button>
@@ -66,11 +66,7 @@ async function connect() {
   state.account = accounts[0];
   state.contract = $('contract').value.trim();
   if (!state.contract) throw new Error('Enter the deployed contract address first.');
-  state.client = createClient({
-    chain: studionet,
-    account: state.account,
-    provider: window.ethereum,
-  });
+  state.client = createClient({ chain: studionet, account: state.account, provider: window.ethereum });
   await state.client.connect('studionet');
   $('account').textContent = `Connected: ${state.account}`;
   out('Connected to Studionet.');
@@ -83,25 +79,16 @@ function requireClient() {
 
 async function write(functionName, args) {
   const client = requireClient();
-  state.contract = $('contract').value.trim();
-  if (!state.contract) throw new Error('Contract address is required.');
-  const hash = await client.writeContract({
-    address: state.contract,
-    functionName,
-    args,
-    value: BigInt(0),
-  });
+  const address = $('contract').value.trim();
+  if (!address) throw new Error('Contract address is required.');
+  const hash = await client.writeContract({ address, functionName, args, value: BigInt(0) });
   return client.waitForTransactionReceipt({ hash, status: 'ACCEPTED' });
 }
 
 $('connect').onclick = async () => { try { await connect(); } catch (e) { out(e.message, true); } };
 $('create').onclick = async () => {
   try {
-    const receipt = await write('create_task', [
-      $('prompt').value,
-      $('reference').value,
-      Number($('tolerance').value),
-    ]);
+    const receipt = await write('create_task', [$('prompt').value, $('reference').value, Number($('tolerance').value), $('pair').value.trim()]);
     out(receipt);
   } catch (e) { out(e.message, true); }
 };
@@ -113,25 +100,21 @@ $('submit').onclick = async () => {
 };
 $('evaluate').onclick = async () => {
   try {
-    const receipt = await write('evaluate', [$('task').value.trim(), $('pair').value.trim()]);
+    const receipt = await write('evaluate', [$('task').value.trim()]);
     out(receipt);
   } catch (e) { out(e.message, true); }
 };
 $('read').onclick = async () => {
   try {
     const client = requireClient();
-    const result = await client.readContract({
-      address: $('contract').value.trim(), functionName: 'get_task', args: [$('task').value.trim()]
-    });
+    const result = await client.readContract({ address: $('contract').value.trim(), functionName: 'get_task', args: [$('task').value.trim()] });
     out(result);
   } catch (e) { out(e.message, true); }
 };
 $('reputation').onclick = async () => {
   try {
     const client = requireClient();
-    const result = await client.readContract({
-      address: $('contract').value.trim(), functionName: 'get_reputation', args: [$('agent').value]
-    });
+    const result = await client.readContract({ address: $('contract').value.trim(), functionName: 'get_reputation', args: [$('agent').value] });
     out(result);
   } catch (e) { out(e.message, true); }
 };
