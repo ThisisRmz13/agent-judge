@@ -82,7 +82,7 @@ class AgentJudge(gl.Contract):
         returned_pair = self._normalize_pair(str(data["pair"]))
         if returned_pair != requested_pair:
             raise gl.vm.UserError("relayer returned a different trading pair")
-        if str(data["source"]) != "binance-spot":
+        if str(data["source"]) != "coincap":
             raise gl.vm.UserError("quote source is not the approved live source")
         if str(data["reference"]) != str(reference_value):
             raise gl.vm.UserError("relayer returned a different reference")
@@ -112,7 +112,7 @@ class AgentJudge(gl.Contract):
         snapshot_json = gl.eq_principle.prompt_comparative(
             lambda: self._quote_snapshot(pair, task["reference_value"]),
             principle="""
-            Both results are a JSON object describing one market quote.
+            Both results are a JSON object describing one CoinCap market quote.
             The pair, source, and reference must match. Price values may differ by up to 50 bps because validators fetch independently.
             Timestamp and age may differ because validators fetch at different moments, provided freshness was enforced.
             Reject if pair, source, or reference differ, fresh is false, age exceeds 60 seconds, timestamp is in the future, or price difference exceeds 50 bps.
