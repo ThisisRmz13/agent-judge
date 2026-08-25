@@ -1,5 +1,5 @@
 const MODE = 'live';
-const BINANCE_API_URL = 'https://api.binance.com/api/v3/ticker/24hr';
+const BINANCE_API_URL = 'https://data-api.binance.vision/api/v3/ticker/24hr';
 const MAX_QUOTE_AGE_MS = 60000;
 
 function normalizePair(pair) {
