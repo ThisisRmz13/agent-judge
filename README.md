@@ -104,7 +104,7 @@ Example task:
 ```text
 prompt: ETH price
 reference_value: 2478
- tolerance_bps: 100
+tolerance_bps: 100
 pair: ETHUSDC
 ```
 
