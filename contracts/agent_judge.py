@@ -103,7 +103,7 @@ class AgentJudge(gl.Contract):
             raise gl.vm.UserError("relayer returned an invalid price")
         return json.dumps({"pair": str(data["pair"]), "price_x1e6": price_x1e6, "source": str(data["source"]), "timestamp_ms": timestamp_ms, "age_ms": age_ms, "fresh": True}, sort_keys=True)
 
-    def _evaluate(self, task_id: str) -> str:
+    def _fetch_and_compute(self, task_id: str) -> str:
         task = json.loads(self.task_data[task_id])
         pair = str(task["pair"])
         answer = float(self.task_answer[task_id])
@@ -125,16 +125,32 @@ class AgentJudge(gl.Contract):
         diff_bps = abs(answer - live_price) / live_price * 10_000.0
         reference_check_bps = abs(live_price - reference) / live_price * 10_000.0
         accepted = diff_bps <= tolerance_bps
+        return json.dumps({
+            "accepted": accepted,
+            "answer": answer,
+            "live_price": live_price,
+            "reference_value": reference,
+            "difference_bps": diff_bps,
+            "reference_difference_bps": reference_check_bps,
+            "tolerance_bps": tolerance_bps,
+            "pair": pair,
+            "source": snapshot["source"],
+            "quote_timestamp_ms": snapshot["timestamp_ms"],
+            "quote_age_ms": snapshot["age_ms"],
+        }, sort_keys=True)
+
+    def _apply_verdict(self, task_id: str, verdict_json: str) -> str:
+        verdict = json.loads(verdict_json)
         old_verdict = self.task_verdict.get(task_id, "PENDING")
         old_accepted = False if old_verdict == "PENDING" else bool(json.loads(old_verdict).get("accepted", False))
-        verdict = {"accepted": accepted, "answer": answer, "live_price": live_price, "reference_value": reference, "difference_bps": diff_bps, "reference_difference_bps": reference_check_bps, "tolerance_bps": tolerance_bps, "pair": pair, "source": snapshot["source"], "quote_timestamp_ms": snapshot["timestamp_ms"], "quote_age_ms": snapshot["age_ms"], "disputed": int(self.dispute_count.get(task_id, u32(0))) > 0}
+        verdict["disputed"] = int(self.dispute_count.get(task_id, u32(0))) > 0
         self.task_verdict[task_id] = json.dumps(verdict, sort_keys=True)
-        self.task_status[task_id] = u8(3) if accepted else u8(4)
+        self.task_status[task_id] = u8(3) if verdict["accepted"] else u8(4)
         agent = self.task_agent[task_id]
-        if agent != "" and accepted and not old_accepted:
+        if agent != "" and verdict["accepted"] and not old_accepted:
             self.reputation[agent] = self.reputation.get(agent, u32(0)) + u32(1)
             self.reputation_credited[task_id] = True
-        elif agent != "" and old_accepted and not accepted and self.reputation_credited.get(task_id, False):
+        elif agent != "" and old_accepted and not verdict["accepted"] and self.reputation_credited.get(task_id, False):
             current = self.reputation.get(agent, u32(0))
             if current > u32(0):
                 self.reputation[agent] = current - u32(1)
@@ -145,7 +161,18 @@ class AgentJudge(gl.Contract):
     def evaluate(self, task_id: str) -> str:
         if self.task_status.get(task_id, u8(0)) != u8(2):
             raise gl.vm.UserError("task must have a submitted answer")
-        return self._evaluate(task_id)
+        verdict_json = self._fetch_and_compute(task_id)
+        verdict = json.loads(verdict_json)
+        old_verdict = self.task_verdict.get(task_id, "PENDING")
+        old_accepted = False if old_verdict == "PENDING" else bool(json.loads(old_verdict).get("accepted", False))
+        verdict["disputed"] = int(self.dispute_count.get(task_id, u32(0))) > 0
+        self.task_verdict[task_id] = json.dumps(verdict, sort_keys=True)
+        self.task_status[task_id] = u8(3) if verdict["accepted"] else u8(4)
+        agent = self.task_agent[task_id]
+        if agent != "" and verdict["accepted"] and not old_accepted:
+            self.reputation[agent] = self.reputation.get(agent, u32(0)) + u32(1)
+            self.reputation_credited[task_id] = True
+        return self.task_verdict[task_id]
 
     @gl.public.write
     def dispute(self, task_id: str) -> str:
@@ -157,14 +184,30 @@ class AgentJudge(gl.Contract):
         if self.dispute_count.get(task_id, u32(0)) != u32(0):
             raise gl.vm.UserError("task has already been disputed")
         self.dispute_count[task_id] = u32(1)
-        return self._evaluate(task_id)
+        verdict_json = self._fetch_and_compute(task_id)
+        verdict = json.loads(verdict_json)
+        old_verdict = self.task_verdict.get(task_id, "PENDING")
+        old_accepted = False if old_verdict == "PENDING" else bool(json.loads(old_verdict).get("accepted", False))
+        verdict["disputed"] = True
+        self.task_verdict[task_id] = json.dumps(verdict, sort_keys=True)
+        self.task_status[task_id] = u8(3) if verdict["accepted"] else u8(4)
+        agent = self.task_agent[task_id]
+        if agent != "" and verdict["accepted"] and not old_accepted:
+            self.reputation[agent] = self.reputation.get(agent, u32(0)) + u32(1)
+            self.reputation_credited[task_id] = True
+        elif agent != "" and old_accepted and not verdict["accepted"] and self.reputation_credited.get(task_id, False):
+            current = self.reputation.get(agent, u32(0))
+            if current > u32(0):
+                self.reputation[agent] = current - u32(1)
+            self.reputation_credited[task_id] = False
+        return self.task_verdict[task_id]
 
     @gl.public.view
     def get_task(self, task_id: str) -> str:
         verdict = self.task_verdict.get(task_id, "PENDING")
         if verdict != "PENDING":
             verdict = json.loads(verdict)
-        return json.dumps({"task_id": task_id, "data": self.task_data.get(task_id, ""), "status": int(self.task_status.get(task_id, u8(0))), "creator": str(self.task_creator.get(task_id, Address("0x0000000000000000000000000000000000000000"))), "agent": self.task_agent.get(task_id, ""), "answer": self.task_answer.get(task_id, ""), "verdict": verdict, "disputes": int(self.dispute_count.get(task_id, u32(0)) )}, sort_keys=True)
+        return json.dumps({"task_id": task_id, "data": self.task_data.get(task_id, ""), "status": int(self.task_status.get(task_id, u8(0))), "creator": str(self.task_creator.get(task_id, Address("0x0000000000000000000000000000000000000000"))), "agent": self.task_agent.get(task_id, ""), "answer": self.task_answer.get(task_id, ""), "verdict": verdict, "disputes": int(self.dispute_count.get(task_id, u32(0)))}, sort_keys=True)
 
     @gl.public.view
     def get_reputation(self, agent_label: str) -> u32:
