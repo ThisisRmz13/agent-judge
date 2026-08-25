@@ -26,7 +26,7 @@ def test_nondeterminism_is_isolated():
     assert 'gl.nondet.web.request' in src
     assert 'gl.eq_principle.prompt_comparative' in src
     assert 'gl.eq_principle.strict_eq' not in src
-    assert 'storage' not in src.split('def _quote_snapshot', 1)[1].split('def _evaluate', 1)[0]
+    assert 'storage' not in src.split('def _quote_snapshot', 1)[1].split('def _fetch_and_compute', 1)[0]
 
 
 def test_validator_agreement_tolerates_quote_movement():
@@ -49,17 +49,18 @@ def test_reputation_reconciles_after_verdict_change():
     src = read_contract()
     assert 'reputation_credited: TreeMap[str, bool]' in src
     assert 'old_accepted' in src
-    assert 'old_accepted and not accepted' in src
+    assert 'old_accepted and not verdict["accepted"]' in src
     assert 'current - u32(1)' in src
-    assert 'accepted and not old_accepted' in src
+    assert 'verdict["accepted"] and not old_accepted' in src
 
 
 def test_live_relayer_has_real_upstream_adapter():
     src = RELAYER.read_text()
-    assert 'api.binance.com/api/v3/ticker/24hr' in src
-    assert 'source: \'binance-spot\'' in src
-    assert 'lastPrice' in src
-    assert 'closeTime' in src
+    assert 'rest.coincap.io/v3/price/bysymbol' in src
+    assert "source: 'coincap'" in src
+    assert 'payload?.data' in src
+    assert 'payload.timestamp' in src
     assert 'MAX_QUOTE_AGE_MS' in src
     assert 'return json(res, 501' not in src
     assert 'price_x1e6: Math.round(price * 1e6)' in src
+    assert 'COINCAP_API_KEY' in src
