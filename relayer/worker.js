@@ -1,21 +1,11 @@
 const MODE = 'live';
-const COINBASE_TICKER_URL = 'https://api.exchange.coinbase.com/products';
+const COINCAP_URL = 'https://api.coincap.io/v2/assets/ethereum';
 const MAX_QUOTE_AGE_MS = 60000;
 
 function normalizePair(pair) {
   const raw = String(pair || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
   if (!raw) throw new Error('pair is required');
   return raw;
-}
-
-function toCoinbaseProductId(symbol) {
-  const knownQuotes = ['USDC', 'USDT', 'USD', 'EUR', 'GBP', 'BTC', 'ETH'];
-  for (const quote of knownQuotes) {
-    if (symbol.endsWith(quote) && symbol.length > quote.length) {
-      return `${symbol.slice(0, -quote.length)}-${quote}`;
-    }
-  }
-  throw new Error('unsupported trading pair');
 }
 
 function json(body, status = 200) {
@@ -32,38 +22,36 @@ async function handleQuote(request) {
 
   try {
     const requestedSymbol = normalizePair(pair);
-    const productId = toCoinbaseProductId(requestedSymbol);
-    const response = await fetch(
-      `${COINBASE_TICKER_URL}/${encodeURIComponent(productId)}/ticker`,
-      { headers: { 'accept': 'application/json' } }
-    );
+    if (requestedSymbol !== 'ETHUSDC') {
+      return json({ error: 'unsupported trading pair', requested_pair: requestedSymbol, supported_pair: 'ETHUSDC' }, 400);
+    }
+
+    const response = await fetch(COINCAP_URL, {
+      headers: { accept: 'application/json' }
+    });
 
     if (!response.ok) {
       return json({ error: 'upstream quote provider returned an error', status: response.status }, 502);
     }
 
-    let data;
+    let payload;
     try {
-      data = await response.json();
+      payload = await response.json();
     } catch {
       return json({ error: 'upstream returned malformed JSON' }, 502);
     }
 
+    const data = payload?.data;
     if (!data || typeof data !== 'object') {
       return json({ error: 'upstream returned a malformed response' }, 502);
     }
 
-    const returnedProduct = normalizePair(productId.replace('-', ''));
-    if (returnedProduct !== requestedSymbol) {
-      return json({
-        error: 'upstream returned a different trading pair',
-        requested_pair: requestedSymbol,
-        returned_pair: returnedProduct
-      }, 502);
+    if (String(data.symbol || '').toUpperCase() !== 'ETH') {
+      return json({ error: 'upstream returned a different asset' }, 502);
     }
 
-    const price = Number(data.price);
-    const timestampMs = Date.parse(data.time);
+    const price = Number(data.priceUsd);
+    const timestampMs = Number(payload.timestamp);
     const now = Date.now();
 
     if (!Number.isFinite(price) || price <= 0) {
@@ -75,11 +63,7 @@ async function handleQuote(request) {
 
     const ageMs = Math.max(0, now - timestampMs);
     if (ageMs > MAX_QUOTE_AGE_MS) {
-      return json({
-        error: 'upstream quote is stale',
-        age_ms: ageMs,
-        max_age_ms: MAX_QUOTE_AGE_MS
-      }, 502);
+      return json({ error: 'upstream quote is stale', age_ms: ageMs, max_age_ms: MAX_QUOTE_AGE_MS }, 502);
     }
 
     return json({
@@ -89,28 +73,18 @@ async function handleQuote(request) {
       timestamp_ms: timestampMs,
       age_ms: ageMs,
       fresh: true,
-      source: 'coinbase-spot'
+      source: 'coincap'
     });
   } catch (error) {
-    return json({
-      error: 'live quote request failed',
-      detail: String(error.message || error)
-    }, 502);
+    return json({ error: 'live quote request failed', detail: String(error.message || error) }, 502);
   }
 }
 
 export default {
-  async fetch(request, env, ctx) {
+  async fetch(request) {
     const url = new URL(request.url);
-
-    if (url.pathname === '/health') {
-      return json({ ok: true, mode: MODE });
-    }
-
-    if (url.pathname === '/quote') {
-      return handleQuote(request);
-    }
-
+    if (url.pathname === '/health') return json({ ok: true, mode: MODE });
+    if (url.pathname === '/quote') return handleQuote(request);
     return new Response('Not Found', { status: 404 });
   }
 };
