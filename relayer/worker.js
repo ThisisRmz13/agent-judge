@@ -1,11 +1,21 @@
 const MODE = 'live';
-const COINCAP_URL = 'https://rest.coincap.io/v3/price/bysymbol/ETH';
+const COINCAP_API_BASE = 'https://rest.coincap.io/v3/price/bysymbol';
 const MAX_QUOTE_AGE_MS = 60000;
 
 function normalizePair(pair) {
   const raw = String(pair || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
   if (!raw) throw new Error('pair is required');
   return raw;
+}
+
+function baseAsset(pair) {
+  const normalized = normalizePair(pair);
+  for (const quote of ['USDC', 'USDT', 'USD']) {
+    if (normalized.endsWith(quote) && normalized.length > quote.length) {
+      return normalized.slice(0, -quote.length);
+    }
+  }
+  throw new Error('unsupported trading pair');
 }
 
 function json(body, status = 200) {
@@ -17,21 +27,18 @@ function json(body, status = 200) {
 
 async function handleQuote(request, env) {
   const url = new URL(request.url);
-  const pair = url.searchParams.get('pair') || 'ETH/USDC';
+  const pair = url.searchParams.get('pair') || 'ETHUSDC';
   const reference = url.searchParams.get('reference') || '0';
 
   try {
     const requestedSymbol = normalizePair(pair);
-    if (requestedSymbol !== 'ETHUSDC') {
-      return json({ error: 'unsupported trading pair', requested_pair: requestedSymbol, supported_pair: 'ETHUSDC' }, 400);
-    }
-
+    const asset = baseAsset(requestedSymbol);
     const apiKey = env?.COINCAP_API_KEY;
     if (!apiKey) {
       return json({ error: 'COINCAP_API_KEY secret is not configured' }, 500);
     }
 
-    const response = await fetch(COINCAP_URL, {
+    const response = await fetch(`${COINCAP_API_BASE}/${encodeURIComponent(asset)}`, {
       headers: {
         accept: 'application/json',
         Authorization: `Bearer ${apiKey}`
@@ -87,7 +94,7 @@ async function handleQuote(request, env) {
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
-    if (url.pathname === '/health') return json({ ok: true, mode: MODE });
+    if (url.pathname === '/health') return json({ ok: true, mode: MODE, source: 'coincap' });
     if (url.pathname === '/quote') return handleQuote(request, env);
     return new Response('Not Found', { status: 404 });
   }
