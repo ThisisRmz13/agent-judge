@@ -9,12 +9,10 @@ function normalizePair(pair) {
 }
 
 function toCoinbaseProductId(symbol) {
-  if (symbol.length < 4) throw new Error('invalid trading pair');
-  for (let i = 2; i <= symbol.length - 2; i++) {
-    const base = symbol.slice(0, i);
-    const quote = symbol.slice(i);
-    if (['USD', 'USDC', 'USDT', 'EUR', 'GBP', 'BTC', 'ETH'].includes(quote)) {
-      return `${base}-${quote}`;
+  const knownQuotes = ['USDC', 'USDT', 'USD', 'EUR', 'GBP', 'BTC', 'ETH'];
+  for (const quote of knownQuotes) {
+    if (symbol.endsWith(quote) && symbol.length > quote.length) {
+      return `${symbol.slice(0, -quote.length)}-${quote}`;
     }
   }
   throw new Error('unsupported trading pair');
