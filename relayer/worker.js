@@ -26,14 +26,15 @@ async function handleQuote(request, env) {
       return json({ error: 'unsupported trading pair', requested_pair: requestedSymbol, supported_pair: 'ETHUSDC' }, 400);
     }
 
-    if (!env.COINCAP_API_KEY) {
+    const apiKey = env?.COINCAP_API_KEY;
+    if (!apiKey) {
       return json({ error: 'COINCAP_API_KEY secret is not configured' }, 500);
     }
 
     const response = await fetch(COINCAP_URL, {
       headers: {
         accept: 'application/json',
-        Authorization: `Bearer ${env.COINCAP_API_KEY}`
+        Authorization: `Bearer ${apiKey}`
       }
     });
 
