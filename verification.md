@@ -21,6 +21,7 @@
 - Post-consensus timestamp/age re-validation: implemented (4 tampered-consensus tests)
 - Malformed JSON handling: implemented
 - Missing required field handling: implemented
+- Failed provider response handling: implemented (HTTP failure and malformed upstream)
 - Local Python test suite: 28 passed (`python -m pytest -v`)
 - Relayer test suite: 6 passed (`npm test` in `relayer/`)
 - GitHub Actions: triggered by push of these changes
