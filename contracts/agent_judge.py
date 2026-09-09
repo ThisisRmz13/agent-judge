@@ -66,6 +66,23 @@ class AgentJudge(gl.Contract):
                 normalized += character
         return normalized
 
+    def _validate_quote_timing(self, timestamp_ms: int, age_ms: int) -> int:
+        """Validate quote timestamp and age independently of relayer self-reporting.
+
+        Returns the effective age in milliseconds, computed so that a relayer
+        cannot hide an old timestamp behind a small reported age.
+        """
+        if age_ms < 0 or age_ms > self.MAX_QUOTE_AGE_MS:
+            raise gl.vm.UserError("relayer returned a stale quote")
+        now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+        timestamp_age_ms = now_ms - timestamp_ms
+        if timestamp_ms <= 0 or timestamp_age_ms < -self.CLOCK_SKEW_MS:
+            raise gl.vm.UserError("relayer returned an invalid quote timestamp")
+        effective_age_ms = max(age_ms, max(0, timestamp_age_ms))
+        if effective_age_ms > self.MAX_QUOTE_AGE_MS:
+            raise gl.vm.UserError("relayer returned a stale quote")
+        return effective_age_ms
+
     def _quote_snapshot(self, pair: str, reference_value: str) -> str:
         requested_pair = self._normalize_pair(pair)
         if requested_pair == "":
@@ -100,16 +117,7 @@ class AgentJudge(gl.Contract):
             price_x1e6 = int(data["price_x1e6"])
         except (OverflowError, TypeError, ValueError):
             raise gl.vm.UserError("relayer response contains invalid numeric fields")
-        if age_ms < 0 or age_ms > self.MAX_QUOTE_AGE_MS:
-            raise gl.vm.UserError("relayer returned a stale quote")
-        now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
-        timestamp_age_ms = now_ms - timestamp_ms
-        if timestamp_ms <= 0 or timestamp_age_ms < -self.CLOCK_SKEW_MS:
-            raise gl.vm.UserError("relayer returned an invalid quote timestamp")
-        # Do not trust a relayer that reports age zero for an old timestamp.
-        effective_age_ms = max(age_ms, max(0, timestamp_age_ms))
-        if effective_age_ms > self.MAX_QUOTE_AGE_MS:
-            raise gl.vm.UserError("relayer returned a stale quote")
+        effective_age_ms = self._validate_quote_timing(timestamp_ms, age_ms)
         if price_x1e6 <= 0:
             raise gl.vm.UserError("relayer returned an invalid price")
         return json.dumps({
@@ -152,7 +160,18 @@ class AgentJudge(gl.Contract):
             raise gl.vm.UserError("relayer returned a different reference")
         if snapshot.get("fresh") is not True:
             raise gl.vm.UserError("relayer returned a stale quote")
-        live_price = float(snapshot["price_x1e6"]) / 1_000_000.0
+        try:
+            snapshot_timestamp_ms = int(snapshot["timestamp_ms"])
+            snapshot_age_ms = int(snapshot["age_ms"])
+            snapshot_price_x1e6 = int(snapshot["price_x1e6"])
+        except (KeyError, OverflowError, TypeError, ValueError):
+            raise gl.vm.UserError("consensus returned a malformed quote")
+        # Re-validate timing on the consensus output itself: a forged
+        # fresh=true flag or fabricated age must not pass final checks.
+        self._validate_quote_timing(snapshot_timestamp_ms, snapshot_age_ms)
+        if snapshot_price_x1e6 <= 0:
+            raise gl.vm.UserError("relayer returned an invalid price")
+        live_price = float(snapshot_price_x1e6) / 1_000_000.0
         if live_price <= 0:
             raise gl.vm.UserError("relayer returned an invalid price")
         diff_bps = abs(answer - live_price) / live_price * 10_000.0
@@ -168,8 +187,8 @@ class AgentJudge(gl.Contract):
             "tolerance_bps": tolerance_bps,
             "pair": pair,
             "source": snapshot["source"],
-            "quote_timestamp_ms": snapshot["timestamp_ms"],
-            "quote_age_ms": snapshot["age_ms"],
+            "quote_timestamp_ms": snapshot_timestamp_ms,
+            "quote_age_ms": snapshot_age_ms,
         }, sort_keys=True)
 
     def _apply_verdict(self, task_id: str, verdict_json: str) -> str:
