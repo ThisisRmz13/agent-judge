@@ -9,6 +9,8 @@ class AgentJudge(gl.Contract):
     """Trust-minimized judge for agent answers against relayed market data."""
 
     MAX_QUOTE_AGE_MS = 60_000
+    CLOCK_SKEW_MS = 5_000
+    APPROVED_QUOTE_SOURCE = "coincap"
 
     task_data: TreeMap[str, str]
     task_status: TreeMap[str, u8]
@@ -58,7 +60,11 @@ class AgentJudge(gl.Contract):
         self.task_status[task_id] = u8(2)
 
     def _normalize_pair(self, pair: str) -> str:
-        return str(pair).upper().replace("/", "")
+        normalized = ""
+        for character in str(pair).upper():
+            if ("A" <= character <= "Z") or ("0" <= character <= "9"):
+                normalized += character
+        return normalized
 
     def _quote_snapshot(self, pair: str, reference_value: str) -> str:
         requested_pair = self._normalize_pair(pair)
@@ -82,26 +88,39 @@ class AgentJudge(gl.Contract):
         returned_pair = self._normalize_pair(str(data["pair"]))
         if returned_pair != requested_pair:
             raise gl.vm.UserError("relayer returned a different trading pair")
-        if str(data["source"]) != "coincap":
+        if str(data["source"]) != self.APPROVED_QUOTE_SOURCE:
             raise gl.vm.UserError("quote source is not the approved live source")
         if str(data["reference"]) != str(reference_value):
             raise gl.vm.UserError("relayer returned a different reference")
-        if not bool(data["fresh"]):
+        if data["fresh"] is not True:
             raise gl.vm.UserError("relayer returned a stale quote")
         try:
             age_ms = int(data["age_ms"])
             timestamp_ms = int(data["timestamp_ms"])
             price_x1e6 = int(data["price_x1e6"])
-        except (TypeError, ValueError):
+        except (OverflowError, TypeError, ValueError):
             raise gl.vm.UserError("relayer response contains invalid numeric fields")
         if age_ms < 0 or age_ms > self.MAX_QUOTE_AGE_MS:
             raise gl.vm.UserError("relayer returned a stale quote")
         now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
-        if timestamp_ms <= 0 or timestamp_ms > now_ms + 5_000:
+        timestamp_age_ms = now_ms - timestamp_ms
+        if timestamp_ms <= 0 or timestamp_age_ms < -self.CLOCK_SKEW_MS:
             raise gl.vm.UserError("relayer returned an invalid quote timestamp")
+        # Do not trust a relayer that reports age zero for an old timestamp.
+        effective_age_ms = max(age_ms, max(0, timestamp_age_ms))
+        if effective_age_ms > self.MAX_QUOTE_AGE_MS:
+            raise gl.vm.UserError("relayer returned a stale quote")
         if price_x1e6 <= 0:
             raise gl.vm.UserError("relayer returned an invalid price")
-        return json.dumps({"pair": str(data["pair"]), "price_x1e6": price_x1e6, "source": str(data["source"]), "timestamp_ms": timestamp_ms, "age_ms": age_ms, "fresh": True}, sort_keys=True)
+        return json.dumps({
+            "pair": requested_pair,
+            "price_x1e6": price_x1e6,
+            "source": self.APPROVED_QUOTE_SOURCE,
+            "reference": str(reference_value),
+            "timestamp_ms": timestamp_ms,
+            "age_ms": effective_age_ms,
+            "fresh": True,
+        }, sort_keys=True)
 
     def _fetch_and_compute(self, task_id: str) -> str:
         task = json.loads(self.task_data[task_id])
@@ -112,13 +131,27 @@ class AgentJudge(gl.Contract):
         snapshot_json = gl.eq_principle.prompt_comparative(
             lambda: self._quote_snapshot(pair, task["reference_value"]),
             principle="""
-            Both results are a JSON object describing one CoinCap market quote.
-            The pair, source, and reference must match. Price values may differ by up to 50 bps because validators fetch independently.
-            Timestamp and age may differ because validators fetch at different moments, provided freshness was enforced.
-            Reject if pair, source, or reference differ, fresh is false, age exceeds 60 seconds, timestamp is in the future, or price difference exceeds 50 bps.
+            Both results are normalized JSON objects for the same CoinCap market quote.
+            The canonical pair, source, and reference must match exactly.
+            Both fresh fields must be true, and each timestamp and age must have
+            passed the contract freshness checks. Price values may differ by up
+            to 50 bps because validators fetch independently. Timestamp and age
+            may differ because validators fetch at different moments.
+            Reject if identity fields differ, a quote is stale or in the future,
+            or the price difference exceeds 50 bps.
             """,
         )
         snapshot = json.loads(snapshot_json)
+        if not isinstance(snapshot, dict):
+            raise gl.vm.UserError("consensus returned a malformed quote")
+        if snapshot.get("pair") != pair:
+            raise gl.vm.UserError("relayer returned a different trading pair")
+        if snapshot.get("source") != self.APPROVED_QUOTE_SOURCE:
+            raise gl.vm.UserError("quote source is not the approved live source")
+        if snapshot.get("reference") != str(task["reference_value"]):
+            raise gl.vm.UserError("relayer returned a different reference")
+        if snapshot.get("fresh") is not True:
+            raise gl.vm.UserError("relayer returned a stale quote")
         live_price = float(snapshot["price_x1e6"]) / 1_000_000.0
         if live_price <= 0:
             raise gl.vm.UserError("relayer returned an invalid price")
@@ -162,17 +195,7 @@ class AgentJudge(gl.Contract):
         if self.task_status.get(task_id, u8(0)) != u8(2):
             raise gl.vm.UserError("task must have a submitted answer")
         verdict_json = self._fetch_and_compute(task_id)
-        verdict = json.loads(verdict_json)
-        old_verdict = self.task_verdict.get(task_id, "PENDING")
-        old_accepted = False if old_verdict == "PENDING" else bool(json.loads(old_verdict).get("accepted", False))
-        verdict["disputed"] = int(self.dispute_count.get(task_id, u32(0))) > 0
-        self.task_verdict[task_id] = json.dumps(verdict, sort_keys=True)
-        self.task_status[task_id] = u8(3) if verdict["accepted"] else u8(4)
-        agent = self.task_agent[task_id]
-        if agent != "" and verdict["accepted"] and not old_accepted:
-            self.reputation[agent] = self.reputation.get(agent, u32(0)) + u32(1)
-            self.reputation_credited[task_id] = True
-        return self.task_verdict[task_id]
+        return self._apply_verdict(task_id, verdict_json)
 
     @gl.public.write
     def dispute(self, task_id: str) -> str:
@@ -183,24 +206,9 @@ class AgentJudge(gl.Contract):
             raise gl.vm.UserError("only completed tasks can be disputed")
         if self.dispute_count.get(task_id, u32(0)) != u32(0):
             raise gl.vm.UserError("task has already been disputed")
-        self.dispute_count[task_id] = u32(1)
         verdict_json = self._fetch_and_compute(task_id)
-        verdict = json.loads(verdict_json)
-        old_verdict = self.task_verdict.get(task_id, "PENDING")
-        old_accepted = False if old_verdict == "PENDING" else bool(json.loads(old_verdict).get("accepted", False))
-        verdict["disputed"] = True
-        self.task_verdict[task_id] = json.dumps(verdict, sort_keys=True)
-        self.task_status[task_id] = u8(3) if verdict["accepted"] else u8(4)
-        agent = self.task_agent[task_id]
-        if agent != "" and verdict["accepted"] and not old_accepted:
-            self.reputation[agent] = self.reputation.get(agent, u32(0)) + u32(1)
-            self.reputation_credited[task_id] = True
-        elif agent != "" and old_accepted and not verdict["accepted"] and self.reputation_credited.get(task_id, False):
-            current = self.reputation.get(agent, u32(0))
-            if current > u32(0):
-                self.reputation[agent] = current - u32(1)
-            self.reputation_credited[task_id] = False
-        return self.task_verdict[task_id]
+        self.dispute_count[task_id] = u32(1)
+        return self._apply_verdict(task_id, verdict_json)
 
     @gl.public.view
     def get_task(self, task_id: str) -> str:

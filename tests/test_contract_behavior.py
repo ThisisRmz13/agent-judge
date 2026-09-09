@@ -16,7 +16,13 @@ class _Address(str):
 class _Response:
     def __init__(self, body): self.body = body.encode("utf-8")
 
-_DEFAULT_RESPONSE = '{"pair":"ETH/USDC","price_x1e6":1906940000,"source":"coincap","timestamp_ms":1723900000000,"age_ms":1000,"fresh":true,"reference":"1906.94"}'
+def _now_ms():
+    return int(datetime.now(timezone.utc).timestamp() * 1000)
+
+def _quote_body(pair="ETH/USDC", price_x1e6=1906940000, source="coincap", reference="1906.94", age_ms=1000, fresh=True, timestamp_ms=None):
+    if timestamp_ms is None:
+        timestamp_ms = _now_ms() - age_ms
+    return json.dumps({"pair": pair, "price_x1e6": price_x1e6, "source": source, "timestamp_ms": timestamp_ms, "age_ms": age_ms, "fresh": fresh, "reference": reference})
 
 class _FakeRuntime:
     class Contract: pass
@@ -36,7 +42,7 @@ class _FakeRuntime:
         class UserError(Exception): pass
     vm = _VM()
     class _Web:
-        response = _Response(_DEFAULT_RESPONSE); captured_url = ""; raises = None
+        response = _Response(_quote_body()); captured_url = ""; raises = None
         @staticmethod
         def request(url, method="GET"):
             _FakeRuntime._Web.captured_url = url
@@ -53,7 +59,7 @@ _FakeRuntime._Nondet.web = _FakeRuntime._Web()
 
 @pytest.fixture(autouse=True)
 def reset_fake_runtime_state():
-    _FakeRuntime._Web.response = _Response(_DEFAULT_RESPONSE)
+    _FakeRuntime._Web.response = _Response(_quote_body())
     _FakeRuntime._Web.captured_url = ""
     _FakeRuntime._Web.raises = None
     _FakeRuntime.message.sender_address = _Address("creator")
@@ -102,7 +108,7 @@ def test_scenario_dispute_requires_creator_and_is_one_shot():
 
 def test_scenario_verdict_reversal_removes_prior_reputation_credit():
     c = make_contract(); tid = create_eth_task(c); c.submit_answer(tid, "1906.94", "agent-d"); c.evaluate(tid)
-    _FakeRuntime._Web.response = _Response('{"pair":"ETH/USDC","price_x1e6":2200000000,"source":"coincap","timestamp_ms":1723900000000,"age_ms":1000,"fresh":true,"reference":"1906.94"}')
+    _FakeRuntime._Web.response = _Response(_quote_body(price_x1e6=2200000000))
     c.dispute(tid); assert c.get_reputation("agent-d") == 0; assert '"accepted": false' in c.get_task(tid)
 
 def test_scenario_live_source_failure_is_rejected():
@@ -119,33 +125,33 @@ def test_scenario_requested_pair_must_match_returned_pair():
 
 def test_scenario_source_mismatch_is_rejected():
     c = make_contract(); tid = create_eth_task(c); c.submit_answer(tid, "1906.94", "agent-source")
-    _FakeRuntime._Web.response = _Response('{"pair":"ETH/USDC","price_x1e6":1906940000,"source":"mock","timestamp_ms":1723900000000,"age_ms":1000,"fresh":true,"reference":"1906.94"}')
+    _FakeRuntime._Web.response = _Response(_quote_body(source="mock"))
     with pytest.raises(_FakeRuntime.vm.UserError, match="approved live source"): c.evaluate(tid)
 
 def test_scenario_stale_quote_is_rejected():
     c = make_contract(); tid = create_eth_task(c); c.submit_answer(tid, "1906.94", "agent-g")
-    _FakeRuntime._Web.response = _Response('{"pair":"ETH/USDC","price_x1e6":1906940000,"source":"coincap","timestamp_ms":1723900000000,"age_ms":60001,"fresh":false,"reference":"1906.94"}')
+    _FakeRuntime._Web.response = _Response(_quote_body(age_ms=60001, fresh=False))
     with pytest.raises(_FakeRuntime.vm.UserError, match="stale quote"): c.evaluate(tid)
 
 def test_scenario_fresh_true_but_stale_age_is_rejected():
     c = make_contract(); tid = create_eth_task(c); c.submit_answer(tid, "1906.94", "agent-fresh")
-    _FakeRuntime._Web.response = _Response('{"pair":"ETH/USDC","price_x1e6":1906940000,"source":"coincap","timestamp_ms":1723900000000,"age_ms":60001,"fresh":true,"reference":"1906.94"}')
+    _FakeRuntime._Web.response = _Response(_quote_body(age_ms=60001))
     with pytest.raises(_FakeRuntime.vm.UserError, match="stale quote"): c.evaluate(tid)
 
 def test_scenario_future_timestamp_is_rejected():
     c = make_contract(); tid = create_eth_task(c); c.submit_answer(tid, "1906.94", "agent-future")
-    future_ms = int(datetime.now(timezone.utc).timestamp() * 1000) + 60000
-    _FakeRuntime._Web.response = _Response('{"pair":"ETH/USDC","price_x1e6":1906940000,"source":"coincap","timestamp_ms":%d,"age_ms":0,"fresh":true,"reference":"1906.94"}' % future_ms)
+    future_ms = _now_ms() + 60000
+    _FakeRuntime._Web.response = _Response(_quote_body(timestamp_ms=future_ms, age_ms=0))
     with pytest.raises(_FakeRuntime.vm.UserError, match="invalid quote timestamp"): c.evaluate(tid)
 
 def test_scenario_reference_mismatch_is_rejected():
     c = make_contract(); tid = create_eth_task(c); c.submit_answer(tid, "1906.94", "agent-ref")
-    _FakeRuntime._Web.response = _Response('{"pair":"ETH/USDC","price_x1e6":1906940000,"source":"coincap","timestamp_ms":1723900000000,"age_ms":1000,"fresh":true,"reference":"9999"}')
+    _FakeRuntime._Web.response = _Response(_quote_body(reference="9999"))
     with pytest.raises(_FakeRuntime.vm.UserError, match="different reference"): c.evaluate(tid)
 
 def test_scenario_reference_and_pair_are_url_encoded():
     c = make_contract()
-    _FakeRuntime._Web.response = _Response('{"pair":"ETH/USDC & TEST","price_x1e6":1906940000,"source":"coincap","timestamp_ms":1723900000000,"age_ms":1000,"fresh":true,"reference":"1906.94+foo&bar"}')
+    _FakeRuntime._Web.response = _Response(_quote_body(pair="ETH/USDC & TEST", reference="1906.94+foo&bar"))
     c._quote_snapshot("ETH/USDC & test", "1906.94+foo&bar")
     assert "pair=ETH%2FUSDC%20%26%20test" in _FakeRuntime._Web.captured_url
     assert "reference=1906.94%2Bfoo%26bar" in _FakeRuntime._Web.captured_url

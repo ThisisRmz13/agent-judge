@@ -1,17 +1,26 @@
 # Verification
 
-## Live quote consensus update
+## Steward feedback fixes (timestamped pair validation)
 
-Replaced `gl.eq_principle.strict_eq` with `gl.eq_principle.prompt_comparative` for the live quote consensus, allowing up to 50 bps of legitimate price movement between independent validator fetches while still requiring exact pair/source match. Added two additional tests for malformed relayer responses (invalid JSON and missing fields).
+- The quote path binds the requested pair: the contract normalizes the requested pair, URL-encodes it into the relayer request, and rejects any response whose returned pair does not match after normalization.
+- Quote freshness is validated independently of relayer self-reporting: the contract compares `timestamp_ms` against its own clock (allowing 5s clock skew), rejects future timestamps, and takes `effective_age_ms = max(age_ms, timestamp_age_ms)` so a relayer cannot hide a stale timestamp behind a small reported age. Quotes older than 60 seconds are rejected.
+- Post-consensus re-validation: after `prompt_comparative` returns, the contract re-checks pair, source, reference, and freshness before trusting the snapshot.
+- Validator agreement tolerates legitimate quote movement: prices from independent validator fetches may differ by up to 50 bps, and timestamp/age may differ; identity fields (pair, source, reference) must match exactly.
+
+## Dispute and reputation fixes
+
+- Only the original task creator can dispute; completed tasks only; one dispute per task.
+- Reputation reconciles when a verdict is reversed: an accepted-then-rejected verdict removes the previously credited reputation point, and a rejected-then-accepted one credits it.
 
 ## Verification status
 
 - Comparative quote consensus: implemented
-- Exact pair/source matching: implemented
+- Exact pair/source/reference matching: implemented
 - 50 bps quote movement tolerance: implemented
-- Freshness validation: implemented
+- Freshness validation with timestamp cross-check: implemented
 - Malformed JSON handling: implemented
 - Missing required field handling: implemented
-- Local test suite: pending execution
-- GitHub Actions: pending workflow result
+- Local Python test suite: 24 passed (`python -m pytest -v`)
+- Relayer test suite: 6 passed (`npm test` in `relayer/`)
+- GitHub Actions: triggered by push of these changes
 - GenLayer Studio `evaluate`: pending live verification

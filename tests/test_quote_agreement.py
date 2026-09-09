@@ -2,24 +2,16 @@ import json
 
 import pytest
 
-from test_contract_behavior import _FakeRuntime, _Response, _DEFAULT_RESPONSE, make_contract
+from test_contract_behavior import _FakeRuntime, _Response, _quote_body, make_contract
 
 
 def _quote(price):
-    return _Response(json.dumps({
-        "pair": "ETH/USDC",
-        "price_x1e6": price,
-        "source": "coincap",
-        "timestamp_ms": 1723900000000,
-        "age_ms": 1000,
-        "fresh": True,
-        "reference": "1906.94",
-    }))
+    return _Response(_quote_body(price_x1e6=price))
 
 
 @pytest.fixture(autouse=True)
 def reset_runtime():
-    _FakeRuntime._Web.response = _Response(_DEFAULT_RESPONSE)
+    _FakeRuntime._Web.response = _Response(_quote_body())
     _FakeRuntime.message.sender_address = _FakeRuntime.Address("creator")
     _FakeRuntime.eq_principle.prompt_comparative = staticmethod(
         lambda fn, principle="": fn()
