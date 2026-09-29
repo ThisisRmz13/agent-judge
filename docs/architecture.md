@@ -67,7 +67,7 @@ A production version should query at least one additional independent source ins
 
 ### Frontend
 
-The repository includes a small browser UI that can call the relayer health and quote endpoints. It is an operational demo surface, not a replacement for GenLayer Studio.
+The repository includes a small browser UI in `frontend/` that talks to the deployed Intelligent Contract on Studionet through a wallet. It creates tasks, submits answers, triggers evaluation, and reads task and reputation state. It does not call the relayer directly; only the contract performs the relayer request inside its non-deterministic evaluation path. It is an operational demo surface, not a replacement for GenLayer Studio.
 
 ## Workflow
 

@@ -2,6 +2,36 @@
 
 A GenLayer Intelligent Contract that evaluates an agent's numeric answer against a fresh external market quote while keeping the verdict, reputation, and dispute logic on-chain.
 
+## Live demo
+
+Frontend: https://agentjudge.netlify.app
+
+The frontend is a Vite app in `frontend/` that connects to the GenLayer contract on Studionet. It supports wallet connection, task creation, answer submission, evaluation, task inspection, and reputation inspection.
+
+## Deployment
+
+The Netlify deployment is defined in the repository by `netlify.toml`:
+
+```text
+base directory:    frontend
+build command:     npm run build
+publish directory: frontend/dist
+Node version:      22
+```
+
+To deploy from this repository, connect the GitHub repo to a Netlify site. Netlify reads `netlify.toml` and builds on every push to `main`. The publish directory in `netlify.toml` is `dist`, which Netlify resolves relative to the `frontend` base directory, so the built output is `frontend/dist`. No environment variables are needed, because the contract address and chain are set in `frontend/src/main.js`.
+
+To build locally:
+
+```bash
+cd frontend
+npm install
+npm run build
+npm run preview
+```
+
+`npm run build` writes `frontend/dist/` (`index.html` plus `assets/`). `frontend/package-lock.json` pins `genlayer-js` to `1.1.8` and `vite` to `8.3.1`, so local builds, the Netlify build, and the CI job install the same dependency tree.
+
 ## Live data path
 
 The current live path is:
@@ -60,11 +90,16 @@ relayer/server.js
 relayer/server.test.js
 relayer/worker.js
 frontend/index.html
+frontend/package.json
+frontend/package-lock.json
 frontend/src/main.js
 tests/test_contract_static.py
 tests/test_contract_behavior.py
 tests/test_quote_agreement.py
 docs/architecture.md
+.github/workflows/test.yml
+netlify.toml
+verification.md
 ```
 
 ## Run the relayer locally
@@ -115,9 +150,12 @@ Do not claim a successful live verdict until the Studio evaluation transaction i
 ## Testing
 
 ```bash
-python -m pytest tests -q
+python -m pytest -v
 cd relayer
+npm install
 npm test
 ```
+
+Local result on 2026-09-29: 28 Python tests passed, 6 relayer tests passed. The CI workflow in `.github/workflows/test.yml` runs the same two jobs plus a frontend build job.
 
 For final GenLayer validation, also run the current GenLayer linter and Studio-mode integration flow.

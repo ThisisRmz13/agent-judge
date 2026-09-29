@@ -22,7 +22,9 @@
 - Malformed JSON handling: implemented
 - Missing required field handling: implemented
 - Failed provider response handling: implemented (HTTP failure and malformed upstream)
-- Local Python test suite: 28 passed (`python -m pytest -v`)
-- Relayer test suite: 6 passed (`npm test` in `relayer/`)
-- GitHub Actions: triggered by push of these changes
+- Local Python test suite: 28 passed (`python -m pytest -v`, 2026-09-29)
+- Relayer test suite: 6 passed (`npm test` in `relayer/`, 2026-09-29)
+- Frontend production build: succeeded (`npm run build` in `frontend/`, 2026-09-29), output in `frontend/dist/`
+- GitHub Actions: workflow `.github/workflows/test.yml` defines three jobs (`pytest`, `relayer`, `frontend`) and runs on pushes to `main` and on pull requests
+- Netlify deployment: configured in `netlify.toml` (`base` `frontend`, `command` `npm run build`, `publish` `dist`, Node 22)
 - GenLayer Studio `evaluate`: pending live verification

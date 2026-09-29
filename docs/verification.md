@@ -102,18 +102,21 @@ All tests use dynamic timestamps (`now - age_ms`), never hardcoded historical ti
 
 **Evidence — GitHub Actions:**
 
-Workflow: `.github/workflows/test.yml` (jobs: `pytest`, `relayer`)
+Workflow: `.github/workflows/test.yml` (jobs: `pytest`, `relayer`, `frontend`)
 
 Latest verified run for this implementation: `b2511a7` and the subsequent doc-cleanup commit trigger the workflow; see the Actions tab for the run triggered by the latest push to `main`. Prior verified run:
 
 - `b9f9634` — https://github.com/ThisisRmz13/agent-judge/actions/runs/34350684187 — `success` (28 Python + 6 relayer in that run's successor; 24 Python in `b9f9634` itself before the 4 tampered tests)
 
-Current local verification:
+Current local verification (2026-09-29):
 
 ```text
 python -m pytest -v  → 28 passed
 npm test (relayer)   → 6 passed
+npm run build (frontend) → succeeded, output in frontend/dist/
 ```
+
+The `frontend` job runs `npm install` and `npm run build` in `frontend/`. `frontend/package-lock.json` pins `genlayer-js` to `1.1.8` and `vite` to `8.3.1`, so the CI build resolves the same dependency tree as the local build.
 
 ## 6. Studio / live integration flow
 
