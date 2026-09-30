@@ -31,6 +31,35 @@ function quoteTimestampMs(response) {
   return Date.parse(header);
 }
 
+const PROBE_TARGETS = {
+  binance: 'https://api.binance.com/api/v3/ticker/price?symbol=ETHUSDC',
+  kraken: 'https://api.kraken.com/0/public/Ticker?pair=ETHUSDC',
+  coinbase: 'https://api.coinbase.com/v2/prices/ETH-USDC/spot',
+  coingecko: 'https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd'
+};
+
+async function handleProbe() {
+  const results = {};
+  await Promise.all(
+    Object.entries(PROBE_TARGETS).map(async ([name, url]) => {
+      const started = Date.now();
+      try {
+        const response = await fetch(url, { headers: { accept: 'application/json' } });
+        const text = await response.text();
+        results[name] = {
+          status: response.status,
+          ms: Date.now() - started,
+          date_header: response.headers.get('date') ? 'present' : 'missing',
+          body: text.slice(0, 220)
+        };
+      } catch (error) {
+        results[name] = { error: String(error.message || error), ms: Date.now() - started };
+      }
+    })
+  );
+  return json(results);
+}
+
 async function handleQuote(request) {
   const url = new URL(request.url);
   const pair = url.searchParams.get('pair') || 'ETHUSDC';
@@ -93,6 +122,7 @@ export default {
   async fetch(request) {
     const url = new URL(request.url);
     if (url.pathname === '/health') return json({ ok: true, mode: MODE, source: 'binance' });
+    if (url.pathname === '/probe') return handleProbe();
     if (url.pathname === '/quote') return handleQuote(request);
     return new Response('Not Found', { status: 404 });
   }
