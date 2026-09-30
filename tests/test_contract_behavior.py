@@ -74,7 +74,7 @@ def load_contract():
     return module.AgentJudge
 
 def make_contract():
-    contract = load_contract()("https://0d316208-agent-judge.mr-aliramezani2.workers.dev")
+    contract = load_contract()("https://agent-judge.mr-aliramezani2.workers.dev")
     for name in ("task_data", "task_status", "task_creator", "task_agent", "task_answer", "task_verdict", "reputation", "reputation_credited", "dispute_count"):
         setattr(contract, name, _TreeMap())
     return contract

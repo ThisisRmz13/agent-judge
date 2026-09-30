@@ -24,7 +24,7 @@ class AgentJudge(gl.Contract):
     task_nonce: u64
     relayer_url: str
 
-    def __init__(self, relayer_url: str):
+    def __init__(self, relayer_url: str = "https://agent-judge.mr-aliramezani2.workers.dev"):
         if relayer_url == "" or ".example" in relayer_url:
             raise gl.vm.UserError("a real relayer_url is required")
         self.task_nonce = u64(0)

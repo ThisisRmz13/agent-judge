@@ -1,7 +1,7 @@
 # Studio submission checklist
 
 - [ ] Load `contracts/agent_judge.py` into GenLayer Studio.
-- [ ] Set the constructor argument `relayer_url` to the deployed Cloudflare Worker URL (an empty or `.example` URL is rejected).
+- [ ] The constructor argument `relayer_url` is pre-filled with the deployed Cloudflare Worker URL. Leave it as is unless the relayer moved; an empty or `.example` URL is rejected.
 - [ ] Deploy the contract.
 - [ ] Copy the deployed contract address into `frontend`.
 - [ ] Run the frontend with `npm install && npm run dev`.
