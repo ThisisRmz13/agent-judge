@@ -120,7 +120,7 @@ The contract constructor carries the deployed Cloudflare Worker URL as its defau
 The current public contract instance is:
 
 ```text
-0x3082642586881146D52ead61277e78bbbAcec786
+0x4cd014f10AAC4D1a642AecAaE8212FA1B062072C
 ```
 
 Then use:

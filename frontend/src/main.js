@@ -9,7 +9,7 @@ app.innerHTML = `
     <header><h1>Agent Judge</h1><p>On-chain task evaluation with GenLayer consensus.</p></header>
     <section class="card">
       <h2>Connection</h2>
-      <input id="contract" value="0x3082642586881146D52ead61277e78bbbAcec786" placeholder="Deployed contract address" />
+      <input id="contract" value="0x4cd014f10AAC4D1a642AecAaE8212FA1B062072C" placeholder="Deployed contract address" />
       <button id="connect">Connect wallet</button>
       <div id="account" class="muted">Disconnected</div>
     </section>
