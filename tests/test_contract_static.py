@@ -56,11 +56,12 @@ def test_reputation_reconciles_after_verdict_change():
 
 def test_live_relayer_has_real_upstream_adapter():
     src = RELAYER.read_text()
-    assert 'rest.coincap.io/v3/price/bysymbol' in src
-    assert "source: 'coincap'" in src
-    assert 'payload?.data' in src
-    assert 'payload.timestamp' in src
+    assert 'api.binance.com/api/v3/ticker/price' in src
+    assert "source: 'binance'" in src
+    assert 'payload?.price' in src
+    assert 'quoteTimestampMs' in src
+    assert 'response.headers.get' in src
     assert 'MAX_QUOTE_AGE_MS' in src
     assert 'return json(res, 501' not in src
     assert 'price_x1e6: Math.round(price * 1e6)' in src
-    assert 'COINCAP_API_KEY' in src
+    assert 'COINCAP_API_KEY' not in src

@@ -1,7 +1,7 @@
 const express = require('express');
 
 const PORT = Number(process.env.PORT || 8787);
-const COINCAP_API_BASE = process.env.COINCAP_API_BASE || 'https://rest.coincap.io/v3/price/bysymbol';
+const BINANCE_API_BASE = process.env.BINANCE_API_BASE || 'https://api.binance.com/api/v3/ticker/price';
 const MAX_QUOTE_AGE_MS = Number(process.env.MAX_QUOTE_AGE_MS || 60000);
 
 function json(res, status, body) {
@@ -24,39 +24,39 @@ function baseAsset(pair) {
   throw new Error('unsupported trading pair');
 }
 
+function quoteTimestampMs(response) {
+  const header = response.headers.get('date');
+  if (!header) return NaN;
+  return Date.parse(header);
+}
+
 function createApp({
-  coinCapApiBase = COINCAP_API_BASE,
+  binanceApiBase = BINANCE_API_BASE,
   maxQuoteAgeMs = MAX_QUOTE_AGE_MS,
-  apiKey = process.env.COINCAP_API_KEY,
   fetchImpl = fetch,
   now = () => Date.now()
 } = {}) {
   const app = express();
   app.use(express.json());
 
-  app.get('/health', (_req, res) => json(res, 200, { ok: true, mode: 'live', source: 'coincap' }));
+  app.get('/health', (_req, res) => json(res, 200, { ok: true, mode: 'live', source: 'binance' }));
 
   app.get('/quote', async (req, res) => {
     const pair = String(req.query.pair || 'ETHUSDC');
     const reference = String(req.query.reference || '0');
 
-    if (!apiKey) {
-      return json(res, 500, { error: 'COINCAP_API_KEY secret is not configured' });
-    }
-
     let requestedSymbol;
-    let asset;
     try {
       requestedSymbol = normalizePair(pair);
-      asset = baseAsset(requestedSymbol);
+      baseAsset(requestedSymbol);
     } catch (error) {
       return json(res, 400, { error: String(error.message || error) });
     }
 
     try {
       const response = await fetchImpl(
-        `${coinCapApiBase}/${encodeURIComponent(asset)}`,
-        { headers: { accept: 'application/json', Authorization: `Bearer ${apiKey}` } }
+        `${binanceApiBase}?symbol=${encodeURIComponent(requestedSymbol)}`,
+        { headers: { accept: 'application/json' } }
       );
 
       if (!response.ok) {
@@ -73,16 +73,12 @@ function createApp({
         return json(res, 502, { error: 'upstream returned malformed JSON' });
       }
 
-      const data = payload?.data;
-      if (!Array.isArray(data) || data.length === 0) {
-        return json(res, 502, { error: 'upstream returned a malformed response' });
-      }
-
-      const price = Number(data[0]);
-      const timestampMs = Number(payload.timestamp);
+      const price = Number(payload?.price);
       if (!Number.isFinite(price) || price <= 0) {
         return json(res, 502, { error: 'upstream returned an invalid price' });
       }
+
+      const timestampMs = quoteTimestampMs(response);
       if (!Number.isFinite(timestampMs) || timestampMs <= 0) {
         return json(res, 502, { error: 'upstream returned an invalid quote timestamp' });
       }
@@ -103,7 +99,7 @@ function createApp({
         timestamp_ms: timestampMs,
         age_ms: ageMs,
         fresh: true,
-        source: 'coincap'
+        source: 'binance'
       });
     } catch (error) {
       return json(res, 502, {
@@ -118,7 +114,7 @@ function createApp({
 
 if (require.main === module) {
   createApp().listen(PORT, '0.0.0.0', () =>
-    console.log(`Agent Judge CoinCap relayer listening on :${PORT}`)
+    console.log(`Agent Judge Binance relayer listening on :${PORT}`)
   );
 }
 

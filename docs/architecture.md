@@ -6,7 +6,7 @@ Agent Judge is a GenLayer Intelligent Contract that evaluates an agent's submitt
 
 The current trust boundary is:
 
-`Agent -> Intelligent Contract -> Equivalence Principle -> Cloudflare Worker -> CoinCap API`
+`Agent -> Intelligent Contract -> Equivalence Principle -> Cloudflare Worker -> Binance API`
 
 The relayer is a transport and validation adapter. It does not decide whether an answer passes, does not write contract state, and does not award reputation.
 
@@ -20,15 +20,15 @@ Strict byte-for-byte equality is not used because independent validators fetch l
 
 After consensus returns, the contract deterministically compares the submitted answer with the agreed live price using the task's `tolerance_bps`.
 
-## CoinCap adapter
+## Binance adapter
 
-The current live provider is CoinCap. The Cloudflare Worker reads `COINCAP_API_KEY` from a secret binding and calls the CoinCap price-by-symbol endpoint.
+The current live provider is Binance. The Cloudflare Worker calls the public Binance ticker endpoint, which needs no API key and no secret binding.
 
-For a requested pair such as `ETHUSDC`, the adapter extracts the base asset (`ETH`) and obtains the CoinCap asset price. The response keeps the requested pair as the contract-facing identifier and labels the source `coincap`.
+For a requested pair such as `ETHUSDC`, the adapter normalizes it to a symbol and requests that symbol directly. The response keeps the requested pair as the contract-facing identifier and labels the source `binance`.
 
-This is an MVP normalization boundary. It should not be described as a direct CoinCap ETH/USDC order-book quote because CoinCap's asset price is USD-denominated. A future multi-source adapter can provide true quote-pair prices when required.
+Binance does not return a timestamp in that payload, so the adapter takes the quote time from the HTTP `Date` header and derives `age_ms` from it. Everything downstream is unchanged.
 
-The Node relayer in `relayer/server.js` mirrors this behavior for local development and tests. It is deliberately dependency-injected so tests can use a local fake upstream without a real CoinCap credential.
+The Node relayer in `relayer/server.js` mirrors this behavior for local development and tests. It is deliberately dependency-injected so tests can use a local fake upstream without a real Binance request.
 
 ## Freshness and integrity checks
 
@@ -55,11 +55,11 @@ The MVP has no dispute staking, rate limiting, or bounded dispute window. These 
 
 ### Single data source risk
 
-CoinCap is currently the single external provider. If it is unavailable or returns data outside the freshness window, evaluation can fail.
+Binance is currently the single external provider. If it is unavailable, geo-blocked from the Worker's egress, or returns data outside the freshness window, evaluation can fail.
 
 ### Pair semantics
 
-The MVP accepts market identifiers such as `ETHUSDC`, but the current CoinCap adapter obtains the base asset's USD price. This is suitable for the current demo but should be replaced with a true quote-pair source before presenting the system as an exact USDC oracle.
+The adapter passes the requested pair through as a Binance symbol, so `ETHUSDC` is the real `ETHUSDC` market. The relayer only accepts pairs ending in `USDC`, `USDT`, or `USD` and rejects anything else with `400`.
 
 ### Multi-source validation
 
@@ -81,4 +81,4 @@ The repository includes a small browser UI in `frontend/` that talks to the depl
 
 ## Submission boundary
 
-The repository contains deterministic local relayer tests. The live Cloudflare Worker requires the `COINCAP_API_KEY` secret and should be the relayer URL used by the deployed contract.
+The repository contains deterministic local relayer tests. The live Cloudflare Worker needs no credentials and should be the relayer URL used by the deployed contract.

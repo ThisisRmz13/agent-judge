@@ -4,19 +4,19 @@ This document records the evidence for the fixes applied in response to the "Act
 
 ## Summary of changes
 
-1. Replaced the placeholder quote path in the relayer with a live CoinCap adapter.
+1. Replaced the placeholder quote path in the relayer with a live Binance adapter.
 2. Added requested-pair validation and quote freshness validation in the contract/relayer flow, centralized in a `_validate_quote_timing` helper and re-validated after consensus.
 3. Restricted dispute initiation to the original task creator and prevented repeated disputes.
 4. Corrected reputation transitions when a verdict changes, including reversal of a prior reputation credit.
 5. Added behavioral and static tests covering live-source failures, pair mismatches, stale quotes, future timestamps, reference mismatches, authorization, repeated disputes, reputation transitions, validator movement, tampered-consensus scenarios, and the live adapter configuration.
 
-## 1. Live CoinCap adapter
+## 1. Live Binance adapter
 
 **Files:** `contracts/agent_judge.py`, `relayer/server.js`, `relayer/worker.js`
 
-The relayer uses CoinCap `GET https://rest.coincap.io/v3/price/bysymbol/{asset}` in live mode (requires `COINCAP_API_KEY` as a `Bearer` token). It normalizes the requested pair, extracts the base asset, reads `payload.data[0]` as price and `payload.timestamp` as upstream timestamp, computes `age_ms = max(0, now - timestamp_ms)`, rejects stale upstream data above `MAX_QUOTE_AGE_MS` (60,000 ms), and returns a normalized payload containing `pair`, `price_x1e6`, `timestamp_ms`, `age_ms`, `fresh: true`, and `source: "coincap"` plus the echoed `reference`.
+The relayer uses Binance `GET https://api.binance.com/api/v3/ticker/price?symbol={symbol}` in live mode, which requires no API key. It normalizes the requested pair to a symbol, reads `payload.price` as the price, and takes the upstream timestamp from the HTTP `Date` header because the Binance payload carries no timestamp of its own. It computes `age_ms = max(0, now - timestamp_ms)`, rejects stale upstream data above `MAX_QUOTE_AGE_MS` (60,000 ms), and returns a normalized payload containing `pair`, `price_x1e6`, `timestamp_ms`, `age_ms`, `fresh: true`, and `source: "binance"` plus the echoed `reference`.
 
-The contract validates that the returned pair matches the requested pair after normalization, the `source` is the approved live source `coincap`, the `reference` matches, numeric fields are valid, `fresh` is exactly `true`, and quote timing passes the contract-clock checks before using the price. Validator agreement uses `gl.eq_principle.prompt_comparative`, requiring exact pair/source/reference agreement while tolerating price movement up to 50 bps and timestamp/age differences that each pass the same timing checks.
+The contract validates that the returned pair matches the requested pair after normalization, the `source` is the approved live source `binance`, the `reference` matches, numeric fields are valid, `fresh` is exactly `true`, and quote timing passes the contract-clock checks before using the price. Validator agreement uses `gl.eq_principle.prompt_comparative`, requiring exact pair/source/reference agreement while tolerating price movement up to 50 bps and timestamp/age differences that each pass the same timing checks.
 
 ## 2. Dispute restricted to task creator
 
@@ -120,10 +120,10 @@ The `frontend` job runs `npm install` and `npm run build` in `frontend/`. `front
 
 ## 6. Studio / live integration flow
 
-The relayer is deployed as a Cloudflare Worker from `ThisisRmz13/agent-judge` (`relayer/worker.js` and `relayer/server.js` share the same CoinCap adapter). The production service exposes `/health` and `/quote`, configured with the `COINCAP_API_KEY` secret, and the deployed Worker URL (e.g. `https://…workers.dev`) is the `relayer_url` passed to the contract constructor. Healthcheck path is `/health`.
+The relayer is deployed as a Cloudflare Worker from `ThisisRmz13/agent-judge` (`relayer/worker.js` and `relayer/server.js` share the same Binance adapter). The production service exposes `/health` and `/quote`, needs no credentials, and the deployed Worker URL (e.g. `https://…workers.dev`) is the `relayer_url` passed to the contract constructor. Healthcheck path is `/health`.
 
 The live adapter implementation is in `relayer/server.js` / `relayer/worker.js`, and the contract is configured to call that URL through its nondeterministic web request path.
 
 ## Notes for the steward
 
-All flagged items from the steward review have been addressed in the repository. The approved quote source is **CoinCap** (`source: "coincap"`, `COINCAP_API_KEY`, `COINCAP_API_BASE=https://rest.coincap.io/v3/price/bysymbol`). GitHub Actions provides the automated verification evidence with 28 Python tests and 6 relayer tests passing. The current post-consensus validation enforces timestamp/age timing independently of the `fresh` flag and prevents stale-timestamp forgeries such as `fresh=true + stale timestamp` and `age_ms=0 + stale timestamp`.
+All flagged items from the steward review have been addressed in the repository. The approved quote source is **Binance** (`source: "binance"`, `BINANCE_API_BASE=https://api.binance.com/api/v3/ticker/price`, no API key). GitHub Actions provides the automated verification evidence with 28 Python tests and 6 relayer tests passing. The current post-consensus validation enforces timestamp/age timing independently of the `fresh` flag and prevents stale-timestamp forgeries such as `fresh=true + stale timestamp` and `age_ms=0 + stale timestamp`.

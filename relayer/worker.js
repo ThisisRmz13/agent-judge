@@ -1,5 +1,5 @@
 const MODE = 'live';
-const COINCAP_API_BASE = 'https://rest.coincap.io/v3/price/bysymbol';
+const BINANCE_API_BASE = 'https://api.binance.com/api/v3/ticker/price';
 const MAX_QUOTE_AGE_MS = 60000;
 
 function normalizePair(pair) {
@@ -25,24 +25,28 @@ function json(body, status = 200) {
   });
 }
 
-async function handleQuote(request, env) {
+function quoteTimestampMs(response) {
+  const header = response.headers.get('date');
+  if (!header) return NaN;
+  return Date.parse(header);
+}
+
+async function handleQuote(request) {
   const url = new URL(request.url);
   const pair = url.searchParams.get('pair') || 'ETHUSDC';
   const reference = url.searchParams.get('reference') || '0';
 
+  let requestedSymbol;
   try {
-    const requestedSymbol = normalizePair(pair);
-    const asset = baseAsset(requestedSymbol);
-    const apiKey = env?.COINCAP_API_KEY;
-    if (!apiKey) {
-      return json({ error: 'COINCAP_API_KEY secret is not configured' }, 500);
-    }
+    requestedSymbol = normalizePair(pair);
+    baseAsset(requestedSymbol);
+  } catch (error) {
+    return json({ error: String(error.message || error) }, 400);
+  }
 
-    const response = await fetch(`${COINCAP_API_BASE}/${encodeURIComponent(asset)}`, {
-      headers: {
-        accept: 'application/json',
-        Authorization: `Bearer ${apiKey}`
-      }
+  try {
+    const response = await fetch(`${BINANCE_API_BASE}?symbol=${encodeURIComponent(requestedSymbol)}`, {
+      headers: { accept: 'application/json' }
     });
 
     if (!response.ok) {
@@ -56,23 +60,17 @@ async function handleQuote(request, env) {
       return json({ error: 'upstream returned malformed JSON' }, 502);
     }
 
-    const data = payload?.data;
-    if (!Array.isArray(data) || data.length === 0) {
-      return json({ error: 'upstream returned a malformed response' }, 502);
-    }
-
-    const price = Number(data[0]);
-    const timestampMs = Number(payload.timestamp);
-    const now = Date.now();
-
+    const price = Number(payload?.price);
     if (!Number.isFinite(price) || price <= 0) {
       return json({ error: 'upstream returned an invalid price' }, 502);
     }
+
+    const timestampMs = quoteTimestampMs(response);
     if (!Number.isFinite(timestampMs) || timestampMs <= 0) {
       return json({ error: 'upstream returned an invalid quote timestamp' }, 502);
     }
 
-    const ageMs = Math.max(0, now - timestampMs);
+    const ageMs = Math.max(0, Date.now() - timestampMs);
     if (ageMs > MAX_QUOTE_AGE_MS) {
       return json({ error: 'upstream quote is stale', age_ms: ageMs, max_age_ms: MAX_QUOTE_AGE_MS }, 502);
     }
@@ -84,7 +82,7 @@ async function handleQuote(request, env) {
       timestamp_ms: timestampMs,
       age_ms: ageMs,
       fresh: true,
-      source: 'coincap'
+      source: 'binance'
     });
   } catch (error) {
     return json({ error: 'live quote request failed', detail: String(error.message || error) }, 502);
@@ -92,10 +90,10 @@ async function handleQuote(request, env) {
 }
 
 export default {
-  async fetch(request, env) {
+  async fetch(request) {
     const url = new URL(request.url);
-    if (url.pathname === '/health') return json({ ok: true, mode: MODE, source: 'coincap' });
-    if (url.pathname === '/quote') return handleQuote(request, env);
+    if (url.pathname === '/health') return json({ ok: true, mode: MODE, source: 'binance' });
+    if (url.pathname === '/quote') return handleQuote(request);
     return new Response('Not Found', { status: 404 });
   }
 };

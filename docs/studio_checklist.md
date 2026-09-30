@@ -6,14 +6,16 @@
 - [ ] Copy the deployed contract address into `frontend`.
 - [ ] Run the frontend with `npm install && npm run dev`.
 - [ ] Connect a wallet to Studionet.
-- [ ] Call `create_task("Return the current ETH/USDC price within tolerance.", "3200", 50, "ETHUSDC")`.
+- [ ] Fetch a fresh quote from the relayer (`GET /quote?pair=ETHUSDC&reference=0`) and reuse the returned price as both the reference and the answer. The verdict compares the answer against the live price captured during consensus, not against the reference, so a stale reference alone does not reject a task, but a stale answer does.
+- [ ] Call `create_task("Return the current ETH/USDC price within tolerance.", "<price from the relayer>", 500, "ETHUSDC")`. `tolerance_bps` must be between 1 and 1000; 500 leaves room for price movement between the quote and consensus.
 - [ ] Copy the returned task id from the transaction/debug trace.
-- [ ] Call `submit_answer(task_id, "3200", "demo-agent")`.
+- [ ] Call `submit_answer(task_id, "<same price>", "demo-agent")`.
 - [ ] Verify `get_task(task_id)` shows status `2` before evaluation.
-- [ ] Configure a reachable relayer endpoint in the contract before testing `evaluate`.
+- [ ] Verify the contract `relayer_url` answers `/health` and `/quote` before testing `evaluate`.
 - [ ] Run `evaluate(task_id)`.
-- [ ] Verify the verdict is persisted in `get_task`.
-- [ ] Verify `get_reputation("demo-agent")` increments after an accepted verdict.
+- [ ] Verify the evaluation transaction reaches `FINALIZED`, not only `ACCEPTED`.
+- [ ] Verify the verdict is persisted in `get_task`: status `3` with `verdict.accepted` true for an accepted verdict, status `4` for a rejected one.
+- [ ] Verify `get_reputation("demo-agent")` increments after an accepted verdict. A rejected verdict leaves it unchanged.
 - [ ] Test `dispute(task_id)` on a completed task.
 - [ ] Capture screenshots of deployment and at least one successful evaluation.
 - [ ] Do not upload `.env`, provider keys, `node_modules`, or local credentials.

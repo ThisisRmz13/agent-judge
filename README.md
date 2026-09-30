@@ -43,12 +43,12 @@ GenLayer AgentJudge
 Cloudflare Worker relayer
         |
         v
-CoinCap API
+Binance API
 ```
 
-The deployed Worker is configured with the `COINCAP_API_KEY` secret. The contract accepts only quote responses whose `source` is `coincap`.
+The Binance price endpoint needs no API key or secret. The contract accepts only quote responses whose `source` is `binance`.
 
-For local development, `relayer/server.js` implements the same CoinCap response contract with an injectable API base and API key, so the relayer tests do not require a real credential.
+For local development, `relayer/server.js` implements the same Binance response contract with an injectable API base, so the relayer tests do not contact Binance.
 
 ## Quality-bar mapping
 
@@ -62,7 +62,7 @@ The core evaluation path is implemented as a Python GenLayer Intelligent Contrac
 
 **3. Live authoritative data boundary**
 
-CoinCap is the current external quote provider. The relayer validates the upstream response, converts the price to integer `price_x1e6`, enforces a 60 second freshness window, and returns a normalized JSON payload.
+Binance is the current external quote provider. The relayer validates the upstream response, converts the price to integer `price_x1e6`, enforces a 60 second freshness window, and returns a normalized JSON payload. Binance returns no timestamp in the response body, so the quote time is taken from the HTTP `Date` header.
 
 **4. Consensus-aware design**
 
@@ -111,7 +111,7 @@ npm test
 npm start
 ```
 
-Set `COINCAP_API_KEY` before starting the live relayer. The tests inject a fake key and a local upstream server, so they do not contact CoinCap.
+The live relayer needs no API key. It reads `BINANCE_API_BASE` only if you want to point it at another host. The tests inject a local upstream server, so they do not contact Binance.
 
 ## GenLayer Studio
 
@@ -143,7 +143,7 @@ tolerance_bps: 100
 pair: ETHUSDC
 ```
 
-The current CoinCap adapter uses the base asset from pairs such as `ETHUSDC` and returns the CoinCap USD price under the requested pair label. The project should therefore treat `ETHUSDC` as the current MVP market identifier, not as proof of a direct CoinCap ETH/USDC order-book quote.
+The Binance adapter passes the requested pair straight through as a symbol, so a request for `ETHUSDC` is a request for Binance's `ETHUSDC` market rather than a base asset price relabelled to the pair. The relayer still supports the pairs it did before (`ETHUSDC`, `ETHUSDT`, `ETHUSD`) and nothing else.
 
 Do not claim a successful live verdict until the Studio evaluation transaction itself reaches `FINALIZED` without a rollback.
 

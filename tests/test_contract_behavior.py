@@ -19,7 +19,7 @@ class _Response:
 def _now_ms():
     return int(datetime.now(timezone.utc).timestamp() * 1000)
 
-def _quote_body(pair="ETH/USDC", price_x1e6=1906940000, source="coincap", reference="1906.94", age_ms=1000, fresh=True, timestamp_ms=None):
+def _quote_body(pair="ETH/USDC", price_x1e6=1906940000, source="binance", reference="1906.94", age_ms=1000, fresh=True, timestamp_ms=None):
     if timestamp_ms is None:
         timestamp_ms = _now_ms() - age_ms
     return json.dumps({"pair": pair, "price_x1e6": price_x1e6, "source": source, "timestamp_ms": timestamp_ms, "age_ms": age_ms, "fresh": fresh, "reference": reference})
@@ -161,5 +161,5 @@ def test_scenario_malformed_response_is_rejected():
     with pytest.raises(_FakeRuntime.vm.UserError, match="malformed JSON"): c.evaluate(tid)
 
 def test_scenario_malformed_missing_fields_is_rejected():
-    c = make_contract(); tid = create_eth_task(c); c.submit_answer(tid, "1906.94", "agent-i"); _FakeRuntime._Web.response = _Response('{"pair":"ETH/USDC","source":"coincap","fresh":true,"age_ms":100,"reference":"1906.94"}')
+    c = make_contract(); tid = create_eth_task(c); c.submit_answer(tid, "1906.94", "agent-i"); _FakeRuntime._Web.response = _Response('{"pair":"ETH/USDC","source":"binance","fresh":true,"age_ms":100,"reference":"1906.94"}')
     with pytest.raises(_FakeRuntime.vm.UserError, match="missing required fields"): c.evaluate(tid)
