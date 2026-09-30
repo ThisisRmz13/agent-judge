@@ -11,6 +11,7 @@ class AgentJudge(gl.Contract):
     MAX_QUOTE_AGE_MS = 60_000
     CLOCK_SKEW_MS = 5_000
     APPROVED_QUOTE_SOURCE = "kraken"
+    DEFAULT_RELAYER_URL = "https://agent-judge.mr-aliramezani2.workers.dev"
 
     task_data: TreeMap[str, str]
     task_status: TreeMap[str, u8]
@@ -24,8 +25,10 @@ class AgentJudge(gl.Contract):
     task_nonce: u64
     relayer_url: str
 
-    def __init__(self, relayer_url: str = "https://agent-judge.mr-aliramezani2.workers.dev"):
-        if relayer_url == "" or ".example" in relayer_url:
+    def __init__(self, relayer_url: str = DEFAULT_RELAYER_URL):
+        if not relayer_url:
+            relayer_url = self.DEFAULT_RELAYER_URL
+        if ".example" in relayer_url:
             raise gl.vm.UserError("a real relayer_url is required")
         self.task_nonce = u64(0)
         self.relayer_url = relayer_url.rstrip("/")
