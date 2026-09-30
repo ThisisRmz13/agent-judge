@@ -3,7 +3,7 @@
 ## Steward feedback fixes (timestamped pair validation)
 
 - The quote path binds the requested pair: the contract normalizes the requested pair, URL-encodes it into the relayer request, and rejects any response whose returned pair does not match after normalization.
-- Quote freshness is validated independently of relayer self-reporting: the contract compares `timestamp_ms` against its own clock (allowing 5s clock skew), rejects future timestamps, and takes `effective_age_ms = max(age_ms, timestamp_age_ms)` so a relayer cannot hide a stale timestamp behind a small reported age. Quotes older than 60 seconds are rejected.
+- Quote freshness is validated independently of relayer self-reporting: the contract compares `timestamp_ms` against its own clock (allowing 300s of clock skew because the GenVM clock lags the relayer's wall clock across consensus rounds), rejects non-positive or far-future timestamps, and takes `effective_age_ms = max(age_ms, timestamp_age_ms)` so a relayer cannot hide a stale timestamp behind a small reported age. Quotes older than 60 seconds are rejected.
 - Post-consensus re-validation: after `prompt_comparative` returns, the contract re-checks pair, source, reference, fresh, and price, **and re-validates timestamp and age timing through the same `_validate_quote_timing` helper** — a forged `fresh=true` flag or fabricated `age_ms` in the consensus output cannot pass final checks. Covered by four tampered-consensus tests.
 - Validator agreement tolerates legitimate quote movement: prices from independent validator fetches may differ by up to 50 bps, and timestamp/age may differ; identity fields (pair, source, reference) must match exactly.
 

@@ -9,7 +9,7 @@ class AgentJudge(gl.Contract):
     """Trust-minimized judge for agent answers against relayed market data."""
 
     MAX_QUOTE_AGE_MS = 60_000
-    CLOCK_SKEW_MS = 5_000
+    CLOCK_SKEW_MS = 300_000
     APPROVED_QUOTE_SOURCE = "kraken"
     DEFAULT_RELAYER_URL = "https://agent-judge.mr-aliramezani2.workers.dev"
 
@@ -79,8 +79,16 @@ class AgentJudge(gl.Contract):
             raise gl.vm.UserError("relayer returned a stale quote")
         now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
         timestamp_age_ms = now_ms - timestamp_ms
+        # Observed on studionet: the same validator produces a verdict in the
+        # first comparative round and reports a future timestamp after a leader
+        # rotation, so the GenVM clock lags the relayer's wall clock by more
+        # than 5s as the transaction ages. The skew bounds that lag. Staleness
+        # is still enforced through effective_age_ms below.
         if timestamp_ms <= 0 or timestamp_age_ms < -self.CLOCK_SKEW_MS:
-            raise gl.vm.UserError("relayer returned an invalid quote timestamp")
+            raise gl.vm.UserError(
+                "relayer returned an invalid quote timestamp (now_ms=" + str(now_ms)
+                + ", timestamp_ms=" + str(timestamp_ms) + ")"
+            )
         effective_age_ms = max(age_ms, max(0, timestamp_age_ms))
         if effective_age_ms > self.MAX_QUOTE_AGE_MS:
             raise gl.vm.UserError("relayer returned a stale quote")

@@ -92,8 +92,15 @@ def test_consensus_with_stale_timestamp_is_rejected():
 def test_consensus_with_future_timestamp_is_rejected():
     with pytest.raises(_FakeRuntime.vm.UserError, match="invalid quote timestamp"):
         _run_with_tampered_consensus(
-            lambda snapshot: snapshot.update(timestamp_ms=_now_ms() + 60_000)
+            lambda snapshot: snapshot.update(timestamp_ms=_now_ms() + 900_000)
         )
+
+
+def test_consensus_with_timestamp_inside_the_clock_skew_is_accepted():
+    verdict = _run_with_tampered_consensus(
+        lambda snapshot: snapshot.update(timestamp_ms=_now_ms() + 60_000)
+    )
+    assert '"accepted": true' in verdict
 
 
 def test_consensus_with_fresh_true_but_stale_timestamp_is_rejected():

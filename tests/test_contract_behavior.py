@@ -140,7 +140,7 @@ def test_scenario_fresh_true_but_stale_age_is_rejected():
 
 def test_scenario_future_timestamp_is_rejected():
     c = make_contract(); tid = create_eth_task(c); c.submit_answer(tid, "1906.94", "agent-future")
-    future_ms = _now_ms() + 60000
+    future_ms = _now_ms() + 900000
     _FakeRuntime._Web.response = _Response(_quote_body(timestamp_ms=future_ms, age_ms=0))
     with pytest.raises(_FakeRuntime.vm.UserError, match="invalid quote timestamp"): c.evaluate(tid)
 
