@@ -137,15 +137,17 @@ get_reputation(agent_label)
 Example task:
 
 ```text
-prompt: ETH price
-reference_value: 2478
-tolerance_bps: 100
-pair: ETHUSDC
+prompt:          ETH price
+reference_value: 2680.87
+tolerance_bps:   500
+pair:            ETHUSDC
 ```
+
+`reference_value` and `answer_value` must both be the current relayer quote, and `tolerance_bps` must be between 1 and 1000. The verdict accepts the answer when `abs(answer - live_price) / live_price * 10000 <= tolerance_bps`, where `live_price` is the Kraken quote fetched at evaluation time.
 
 The Kraken adapter passes the requested pair straight through, so a request for `ETHUSDC` is a request for Kraken's `ETHUSDC` market rather than a base asset price relabelled to the pair. The relayer still supports the pairs it did before (`ETHUSDC`, `ETHUSDT`, `ETHUSD`) and nothing else.
 
-Do not claim a successful live verdict until the Studio evaluation transaction itself reaches `FINALIZED` without a rollback.
+Verified on 2026-09-30 against contract `0xd34467e67057235Fa8732c99bE4dA9FD194ef24c`: `create_task` then `submit_answer` then `evaluate` reached `FINALIZED` with `MAJORITY_AGREE`, `get_task` returned status `3` with `"accepted": true`, and `get_reputation("demo-agent")` returned `2`. The same flow was run from the deployed frontend at https://agentjudge.netlify.app.
 
 ## Testing
 
@@ -156,6 +158,8 @@ npm install
 npm test
 ```
 
-Local result on 2026-09-29: 28 Python tests passed, 6 relayer tests passed. The CI workflow in `.github/workflows/test.yml` runs the same two jobs plus a frontend build job.
+Local result on 2026-09-30: 29 Python tests passed, 6 relayer tests passed. The CI workflow in `.github/workflows/test.yml` runs the Python job, the relayer job, and a frontend build job on every push to `main`.
+
+CI runs: https://github.com/ThisisRmz13/agent-judge/actions
 
 For final GenLayer validation, also run the current GenLayer linter and Studio-mode integration flow.
