@@ -115,12 +115,12 @@ The live relayer needs no API key. It reads `KRAKEN_API_BASE` only if you want t
 
 ## GenLayer Studio
 
-Deploy the current `contracts/agent_judge.py` with the deployed Cloudflare Worker URL as the constructor argument.
+The contract constructor carries the deployed Cloudflare Worker URL as its default, so it can be left blank in Studio.
 
 The current public contract instance is:
 
 ```text
-0x0F4c2b69BC64784Ef26A15ddAFceb733c4276949
+0x3082642586881146D52ead61277e78bbbAcec786
 ```
 
 Then use:
