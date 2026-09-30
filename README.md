@@ -43,12 +43,12 @@ GenLayer AgentJudge
 Cloudflare Worker relayer
         |
         v
-Binance API
+Kraken API
 ```
 
-The Binance price endpoint needs no API key or secret. The contract accepts only quote responses whose `source` is `binance`.
+The Kraken public ticker endpoint needs no API key or secret. The contract accepts only quote responses whose `source` is `kraken`.
 
-For local development, `relayer/server.js` implements the same Binance response contract with an injectable API base, so the relayer tests do not contact Binance.
+For local development, `relayer/server.js` implements the same Kraken response contract with an injectable API base, so the relayer tests do not contact Kraken.
 
 ## Quality-bar mapping
 
@@ -62,7 +62,7 @@ The core evaluation path is implemented as a Python GenLayer Intelligent Contrac
 
 **3. Live authoritative data boundary**
 
-Binance is the current external quote provider. The relayer validates the upstream response, converts the price to integer `price_x1e6`, enforces a 60 second freshness window, and returns a normalized JSON payload. Binance returns no timestamp in the response body, so the quote time is taken from the HTTP `Date` header.
+Kraken is the current external quote provider. The relayer validates the upstream response, converts the price to integer `price_x1e6`, enforces a 60 second freshness window, and returns a normalized JSON payload. The Kraken ticker payload carries no timestamp, so the quote time is taken from the HTTP `Date` header.
 
 **4. Consensus-aware design**
 
@@ -111,7 +111,7 @@ npm test
 npm start
 ```
 
-The live relayer needs no API key. It reads `BINANCE_API_BASE` only if you want to point it at another host. The tests inject a local upstream server, so they do not contact Binance.
+The live relayer needs no API key. It reads `KRAKEN_API_BASE` only if you want to point it at another host. The tests inject a local upstream server, so they do not contact Kraken.
 
 ## GenLayer Studio
 
@@ -143,7 +143,7 @@ tolerance_bps: 100
 pair: ETHUSDC
 ```
 
-The Binance adapter passes the requested pair straight through as a symbol, so a request for `ETHUSDC` is a request for Binance's `ETHUSDC` market rather than a base asset price relabelled to the pair. The relayer still supports the pairs it did before (`ETHUSDC`, `ETHUSDT`, `ETHUSD`) and nothing else.
+The Kraken adapter passes the requested pair straight through, so a request for `ETHUSDC` is a request for Kraken's `ETHUSDC` market rather than a base asset price relabelled to the pair. The relayer still supports the pairs it did before (`ETHUSDC`, `ETHUSDT`, `ETHUSD`) and nothing else.
 
 Do not claim a successful live verdict until the Studio evaluation transaction itself reaches `FINALIZED` without a rollback.
 

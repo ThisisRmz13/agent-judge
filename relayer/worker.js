@@ -1,5 +1,5 @@
 const MODE = 'live';
-const BINANCE_API_BASE = 'https://api.binance.com/api/v3/ticker/price';
+const KRAKEN_API_BASE = 'https://api.kraken.com/0/public/Ticker';
 const MAX_QUOTE_AGE_MS = 60000;
 
 function normalizePair(pair) {
@@ -31,33 +31,9 @@ function quoteTimestampMs(response) {
   return Date.parse(header);
 }
 
-const PROBE_TARGETS = {
-  binance: 'https://api.binance.com/api/v3/ticker/price?symbol=ETHUSDC',
-  kraken: 'https://api.kraken.com/0/public/Ticker?pair=ETHUSDC',
-  coinbase: 'https://api.coinbase.com/v2/prices/ETH-USDC/spot',
-  coingecko: 'https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd'
-};
-
-async function handleProbe() {
-  const results = {};
-  await Promise.all(
-    Object.entries(PROBE_TARGETS).map(async ([name, url]) => {
-      const started = Date.now();
-      try {
-        const response = await fetch(url, { headers: { accept: 'application/json' } });
-        const text = await response.text();
-        results[name] = {
-          status: response.status,
-          ms: Date.now() - started,
-          date_header: response.headers.get('date') ? 'present' : 'missing',
-          body: text.slice(0, 220)
-        };
-      } catch (error) {
-        results[name] = { error: String(error.message || error), ms: Date.now() - started };
-      }
-    })
-  );
-  return json(results);
+function readPrice(payload, symbol) {
+  const ticker = payload?.result?.[symbol] || Object.values(payload?.result || {})[0];
+  return Number(ticker?.c?.[0]);
 }
 
 async function handleQuote(request) {
@@ -74,7 +50,7 @@ async function handleQuote(request) {
   }
 
   try {
-    const response = await fetch(`${BINANCE_API_BASE}?symbol=${encodeURIComponent(requestedSymbol)}`, {
+    const response = await fetch(`${KRAKEN_API_BASE}?pair=${encodeURIComponent(requestedSymbol)}`, {
       headers: { accept: 'application/json' }
     });
 
@@ -89,7 +65,11 @@ async function handleQuote(request) {
       return json({ error: 'upstream returned malformed JSON' }, 502);
     }
 
-    const price = Number(payload?.price);
+    if (Array.isArray(payload?.error) && payload.error.length > 0) {
+      return json({ error: 'upstream quote provider returned an error', detail: payload.error.join(' | ') }, 502);
+    }
+
+    const price = readPrice(payload, requestedSymbol);
     if (!Number.isFinite(price) || price <= 0) {
       return json({ error: 'upstream returned an invalid price' }, 502);
     }
@@ -111,7 +91,7 @@ async function handleQuote(request) {
       timestamp_ms: timestampMs,
       age_ms: ageMs,
       fresh: true,
-      source: 'binance'
+      source: 'kraken'
     });
   } catch (error) {
     return json({ error: 'live quote request failed', detail: String(error.message || error) }, 502);
@@ -121,8 +101,7 @@ async function handleQuote(request) {
 export default {
   async fetch(request) {
     const url = new URL(request.url);
-    if (url.pathname === '/health') return json({ ok: true, mode: MODE, source: 'binance' });
-    if (url.pathname === '/probe') return handleProbe();
+    if (url.pathname === '/health') return json({ ok: true, mode: MODE, source: 'kraken' });
     if (url.pathname === '/quote') return handleQuote(request);
     return new Response('Not Found', { status: 404 });
   }

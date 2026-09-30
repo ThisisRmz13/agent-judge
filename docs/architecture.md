@@ -6,7 +6,7 @@ Agent Judge is a GenLayer Intelligent Contract that evaluates an agent's submitt
 
 The current trust boundary is:
 
-`Agent -> Intelligent Contract -> Equivalence Principle -> Cloudflare Worker -> Binance API`
+`Agent -> Intelligent Contract -> Equivalence Principle -> Cloudflare Worker -> Kraken API`
 
 The relayer is a transport and validation adapter. It does not decide whether an answer passes, does not write contract state, and does not award reputation.
 
@@ -20,15 +20,15 @@ Strict byte-for-byte equality is not used because independent validators fetch l
 
 After consensus returns, the contract deterministically compares the submitted answer with the agreed live price using the task's `tolerance_bps`.
 
-## Binance adapter
+## Kraken adapter
 
-The current live provider is Binance. The Cloudflare Worker calls the public Binance ticker endpoint, which needs no API key and no secret binding.
+The current live provider is Kraken. The Cloudflare Worker calls the public Kraken ticker endpoint, which needs no API key and no secret binding.
 
-For a requested pair such as `ETHUSDC`, the adapter normalizes it to a symbol and requests that symbol directly. The response keeps the requested pair as the contract-facing identifier and labels the source `binance`.
+For a requested pair such as `ETHUSDC`, the adapter normalizes it and requests that pair directly. The response keeps the requested pair as the contract-facing identifier and labels the source `kraken`.
 
-Binance does not return a timestamp in that payload, so the adapter takes the quote time from the HTTP `Date` header and derives `age_ms` from it. Everything downstream is unchanged.
+The Kraken ticker payload carries no timestamp, so the adapter takes the quote time from the HTTP `Date` header and derives `age_ms` from it. Everything downstream is unchanged.
 
-The Node relayer in `relayer/server.js` mirrors this behavior for local development and tests. It is deliberately dependency-injected so tests can use a local fake upstream without a real Binance request.
+The Node relayer in `relayer/server.js` mirrors this behavior for local development and tests. It is deliberately dependency-injected so tests can use a local fake upstream without a real Kraken request.
 
 ## Freshness and integrity checks
 
@@ -55,11 +55,11 @@ The MVP has no dispute staking, rate limiting, or bounded dispute window. These 
 
 ### Single data source risk
 
-Binance is currently the single external provider. If it is unavailable, geo-blocked from the Worker's egress, or returns data outside the freshness window, evaluation can fail.
+Kraken is currently the single external provider. If it is unavailable or returns data outside the freshness window, evaluation can fail. Binance and CoinGecko both answered `403` from the Worker's egress during the provider change, which is why they are not used here.
 
 ### Pair semantics
 
-The adapter passes the requested pair through as a Binance symbol, so `ETHUSDC` is the real `ETHUSDC` market. The relayer only accepts pairs ending in `USDC`, `USDT`, or `USD` and rejects anything else with `400`.
+The adapter passes the requested pair through to Kraken, so `ETHUSDC` is the real `ETHUSDC` market. The relayer only accepts pairs ending in `USDC`, `USDT`, or `USD` and rejects anything else with `400`.
 
 ### Multi-source validation
 

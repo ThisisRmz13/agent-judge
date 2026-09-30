@@ -10,7 +10,7 @@ class AgentJudge(gl.Contract):
 
     MAX_QUOTE_AGE_MS = 60_000
     CLOCK_SKEW_MS = 5_000
-    APPROVED_QUOTE_SOURCE = "binance"
+    APPROVED_QUOTE_SOURCE = "kraken"
 
     task_data: TreeMap[str, str]
     task_status: TreeMap[str, u8]
@@ -139,7 +139,7 @@ class AgentJudge(gl.Contract):
         snapshot_json = gl.eq_principle.prompt_comparative(
             lambda: self._quote_snapshot(pair, task["reference_value"]),
             principle="""
-            Both results are normalized JSON objects for the same Binance market quote.
+            Both results are normalized JSON objects for the same Kraken market quote.
             The canonical pair, source, and reference must match exactly.
             Both fresh fields must be true, and each timestamp and age must have
             passed the contract freshness checks. Price values may differ by up

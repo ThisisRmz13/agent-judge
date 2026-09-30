@@ -4,7 +4,7 @@ const test = require('node:test');
 
 const { createApp } = require('./server');
 
-const UPSTREAM_PATH = '/price';
+const UPSTREAM_PATH = '/ticker';
 
 function startServer(handler) {
   const server = http.createServer(handler);
@@ -37,8 +37,11 @@ function upstreamUrl(upstream) {
   return `http://127.0.0.1:${upstream.address().port}${UPSTREAM_PATH}`;
 }
 
-function binancePayload(price) {
-  return JSON.stringify({ symbol: 'ETHUSDC', price: String(price) });
+function krakenPayload(price) {
+  return JSON.stringify({
+    error: [],
+    result: { ETHUSDC: { c: [String(price), '0.100'] } }
+  });
 }
 
 function jsonAt(res, dateMs, body) {
@@ -50,21 +53,21 @@ function jsonAt(res, dateMs, body) {
   res.end(body);
 }
 
-test('relayer sends the requested asset pair to Binance as a symbol', async () => {
+test('relayer sends the requested asset pair to Kraken as a pair', async () => {
   const now = Math.floor(Date.now() / 1000) * 1000;
   let requestedPath = '';
   const upstream = await startServer((req, res) => {
     requestedPath = req.url;
-    jsonAt(res, now, binancePayload('2478'));
+    jsonAt(res, now, krakenPayload('2478'));
   });
-  const relayer = await startApp({ binanceApiBase: upstreamUrl(upstream), now: () => now });
+  const relayer = await startApp({ krakenApiBase: upstreamUrl(upstream), now: () => now });
 
   try {
     const result = await requestQuote(`http://127.0.0.1:${relayer.address().port}`);
     assert.equal(result.status, 200);
-    assert.equal(requestedPath, '/price?symbol=ETHUSDC');
+    assert.equal(requestedPath, '/ticker?pair=ETHUSDC');
     assert.equal(result.body.pair, 'ETHUSDC');
-    assert.equal(result.body.source, 'binance');
+    assert.equal(result.body.source, 'kraken');
     assert.equal(result.body.price_x1e6, 2478000000);
     assert.equal(result.body.timestamp_ms, now);
     assert.equal(result.body.age_ms, 0);
@@ -80,7 +83,7 @@ test('relayer rejects upstream HTTP failures', async () => {
     res.writeHead(500, { 'content-type': 'application/json' });
     res.end(JSON.stringify({ error: 'upstream down' }));
   });
-  const relayer = await startApp({ binanceApiBase: upstreamUrl(upstream) });
+  const relayer = await startApp({ krakenApiBase: upstreamUrl(upstream) });
 
   try {
     const result = await requestQuote(`http://127.0.0.1:${relayer.address().port}`);
@@ -98,7 +101,7 @@ test('relayer rejects malformed upstream JSON', async () => {
     res.writeHead(200, { 'content-type': 'application/json' });
     res.end('{not-json');
   });
-  const relayer = await startApp({ binanceApiBase: upstreamUrl(upstream) });
+  const relayer = await startApp({ krakenApiBase: upstreamUrl(upstream) });
 
   try {
     const result = await requestQuote(`http://127.0.0.1:${relayer.address().port}`);
@@ -110,12 +113,12 @@ test('relayer rejects malformed upstream JSON', async () => {
   }
 });
 
-test('relayer rejects stale Binance quotes', async () => {
+test('relayer rejects stale Kraken quotes', async () => {
   const now = Math.floor(Date.now() / 1000) * 1000;
   const upstream = await startServer((_req, res) => {
-    jsonAt(res, now - 60001, binancePayload('2478'));
+    jsonAt(res, now - 60001, krakenPayload('2478'));
   });
-  const relayer = await startApp({ binanceApiBase: upstreamUrl(upstream), now: () => now });
+  const relayer = await startApp({ krakenApiBase: upstreamUrl(upstream), now: () => now });
 
   try {
     const result = await requestQuote(`http://127.0.0.1:${relayer.address().port}`);
@@ -147,9 +150,9 @@ test('relayer rejects quotes that carry no timestamp', async () => {
   const upstream = await startServer((_req, res) => {
     res.sendDate = false;
     res.writeHead(200, { 'content-type': 'application/json' });
-    res.end(binancePayload('2478'));
+    res.end(krakenPayload('2478'));
   });
-  const relayer = await startApp({ binanceApiBase: upstreamUrl(upstream) });
+  const relayer = await startApp({ krakenApiBase: upstreamUrl(upstream) });
 
   try {
     const result = await requestQuote(`http://127.0.0.1:${relayer.address().port}`);

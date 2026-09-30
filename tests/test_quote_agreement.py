@@ -54,7 +54,7 @@ def test_validator_agreement_accepts_legitimate_quote_movement():
     assert "reference" in principle
     assert "Timestamp and age" in principle
     assert "freshness" in principle
-    assert "Binance" in principle
+    assert "Kraken" in principle
 
 
 def test_validator_agreement_rejects_excessive_quote_movement():

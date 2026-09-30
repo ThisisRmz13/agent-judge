@@ -1,7 +1,7 @@
 const express = require('express');
 
 const PORT = Number(process.env.PORT || 8787);
-const BINANCE_API_BASE = process.env.BINANCE_API_BASE || 'https://api.binance.com/api/v3/ticker/price';
+const KRAKEN_API_BASE = process.env.KRAKEN_API_BASE || 'https://api.kraken.com/0/public/Ticker';
 const MAX_QUOTE_AGE_MS = Number(process.env.MAX_QUOTE_AGE_MS || 60000);
 
 function json(res, status, body) {
@@ -30,8 +30,13 @@ function quoteTimestampMs(response) {
   return Date.parse(header);
 }
 
+function readPrice(payload, symbol) {
+  const ticker = payload?.result?.[symbol] || Object.values(payload?.result || {})[0];
+  return Number(ticker?.c?.[0]);
+}
+
 function createApp({
-  binanceApiBase = BINANCE_API_BASE,
+  krakenApiBase = KRAKEN_API_BASE,
   maxQuoteAgeMs = MAX_QUOTE_AGE_MS,
   fetchImpl = fetch,
   now = () => Date.now()
@@ -39,7 +44,7 @@ function createApp({
   const app = express();
   app.use(express.json());
 
-  app.get('/health', (_req, res) => json(res, 200, { ok: true, mode: 'live', source: 'binance' }));
+  app.get('/health', (_req, res) => json(res, 200, { ok: true, mode: 'live', source: 'kraken' }));
 
   app.get('/quote', async (req, res) => {
     const pair = String(req.query.pair || 'ETHUSDC');
@@ -55,7 +60,7 @@ function createApp({
 
     try {
       const response = await fetchImpl(
-        `${binanceApiBase}?symbol=${encodeURIComponent(requestedSymbol)}`,
+        `${krakenApiBase}?pair=${encodeURIComponent(requestedSymbol)}`,
         { headers: { accept: 'application/json' } }
       );
 
@@ -73,7 +78,14 @@ function createApp({
         return json(res, 502, { error: 'upstream returned malformed JSON' });
       }
 
-      const price = Number(payload?.price);
+      if (Array.isArray(payload?.error) && payload.error.length > 0) {
+        return json(res, 502, {
+          error: 'upstream quote provider returned an error',
+          detail: payload.error.join(' | ')
+        });
+      }
+
+      const price = readPrice(payload, requestedSymbol);
       if (!Number.isFinite(price) || price <= 0) {
         return json(res, 502, { error: 'upstream returned an invalid price' });
       }
@@ -99,7 +111,7 @@ function createApp({
         timestamp_ms: timestampMs,
         age_ms: ageMs,
         fresh: true,
-        source: 'binance'
+        source: 'kraken'
       });
     } catch (error) {
       return json(res, 502, {
@@ -114,7 +126,7 @@ function createApp({
 
 if (require.main === module) {
   createApp().listen(PORT, '0.0.0.0', () =>
-    console.log(`Agent Judge Binance relayer listening on :${PORT}`)
+    console.log(`Agent Judge Kraken relayer listening on :${PORT}`)
   );
 }
 

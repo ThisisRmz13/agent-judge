@@ -56,12 +56,14 @@ def test_reputation_reconciles_after_verdict_change():
 
 def test_live_relayer_has_real_upstream_adapter():
     src = RELAYER.read_text()
-    assert 'api.binance.com/api/v3/ticker/price' in src
-    assert "source: 'binance'" in src
-    assert 'payload?.price' in src
+    assert 'api.kraken.com/0/public/Ticker' in src
+    assert "source: 'kraken'" in src
+    assert 'payload?.result' in src
+    assert 'payload?.error' in src
     assert 'quoteTimestampMs' in src
     assert 'response.headers.get' in src
     assert 'MAX_QUOTE_AGE_MS' in src
     assert 'return json(res, 501' not in src
     assert 'price_x1e6: Math.round(price * 1e6)' in src
     assert 'COINCAP_API_KEY' not in src
+    assert 'KRAKEN_API_KEY' not in src
